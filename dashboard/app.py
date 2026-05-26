@@ -70,7 +70,7 @@ with st.sidebar:
     st.header("Filters")
     lookback_days = st.slider("Lookback window (days)", 7, 180, 30, step=7)
     st.divider()
-    if st.button("🔄 Refresh data", width="stretch"):
+    if st.button("🔄 Refresh data", use_container_width=True, key="refresh"):
         st.cache_data.clear()
         st.rerun()
 
@@ -164,13 +164,13 @@ with tab_overview:
     with col_left:
         st.plotly_chart(
             daily_jobs_line(_daily(lookback_days)),
-            width="stretch",
+            use_container_width=True,
         )
 
     with col_right:
         st.plotly_chart(
             category_weekly_bar(_cat_weekly(weeks)),
-            width="stretch",
+            use_container_width=True,
         )
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -183,7 +183,7 @@ with tab_categories:
     col_l, col_r = st.columns(2)
 
     with col_l:
-        st.plotly_chart(category_growth_bar(_cat_growth()), width="stretch")
+        st.plotly_chart(category_growth_bar(_cat_growth()), use_container_width=True)
 
         growth = _cat_growth()
         if growth:
@@ -195,10 +195,10 @@ with tab_categories:
                 "this_week":  "This week",
                 "change_pct": "Change %",
             })
-            st.dataframe(df_g, hide_index=True, width="stretch")
+            st.dataframe(df_g, hide_index=True, use_container_width=True)
 
     with col_r:
-        st.plotly_chart(salary_box_by_category(_salary_trends(weeks)), width="stretch")
+        st.plotly_chart(salary_box_by_category(_salary_trends(weeks)), use_container_width=True)
 
         sal = _salary_trends(weeks)
         if sal:
@@ -221,7 +221,7 @@ with tab_categories:
             st.dataframe(
                 df_s[["Category", "Avg floor", "Avg ceiling", "Jobs with salary"]],
                 hide_index=True,
-                width="stretch",
+                use_container_width=True,
             )
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -235,7 +235,7 @@ with tab_institutions:
     with col_l:
         st.plotly_chart(
             top_institutions_bar(_top_inst(lookback_days), lookback_days),
-            width="stretch",
+            use_container_width=True,
         )
 
     with col_r:
@@ -248,7 +248,7 @@ with tab_institutions:
                 lambda s: ", ".join(CATEGORY_LABELS.get(c.strip(), c.strip()) for c in s.split(","))
             )
             df_sp.columns = ["Institution", "Jobs", "Categories"]
-            st.dataframe(df_sp, hide_index=True, width="stretch")
+            st.dataframe(df_sp, hide_index=True, use_container_width=True)
         else:
             st.info("No spikes detected in this window.")
 
@@ -256,7 +256,7 @@ with tab_institutions:
 
     st.plotly_chart(
         institution_salary_scatter(_salary_inst(lookback_days)),
-        width="stretch",
+        use_container_width=True,
     )
 
     st.divider()
@@ -278,7 +278,7 @@ with tab_institutions:
                 labels={"week": "ISO week", "job_count": "Jobs"},
                 title=f"{selected} — weekly postings",
             )
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
 
         breakdown = institution_category_breakdown(days=lookback_days)
         inst_rows = [r for r in breakdown if r["institution"] == selected]
@@ -286,7 +286,7 @@ with tab_institutions:
             df_b = pd.DataFrame(inst_rows)[["category", "job_count"]]
             df_b["category"] = df_b["category"].map(lambda s: CATEGORY_LABELS.get(s, s))
             df_b.columns = ["Category", "Jobs"]
-            st.dataframe(df_b, hide_index=True, width="stretch")
+            st.dataframe(df_b, hide_index=True, use_container_width=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 4 — DATA
@@ -341,7 +341,7 @@ with tab_data:
         st.dataframe(
             df_display,
             hide_index=True,
-            width="stretch",
+            use_container_width=True,
             column_config={
                 "URL": st.column_config.LinkColumn("URL", display_text="Open"),
             },
