@@ -1,0 +1,14 @@
+[Unit]
+Description=HE Job Market Dashboard (Streamlit)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/he-market-analysis
+ExecStart=/opt/he-market-analysis/venv/bin/python -m streamlit run dashboard/app.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
