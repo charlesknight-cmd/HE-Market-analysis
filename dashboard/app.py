@@ -61,7 +61,7 @@ from dashboard.charts import (
     title_frequency_bar,
     top_institutions_bar,
 )
-from db.queries import get_all_jobs
+from db.queries import get_all_jobs, last_scrape_time
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
@@ -90,9 +90,12 @@ with st.sidebar:
     st.header("Filters")
     lookback_days = st.slider("Lookback window (days)", 7, 180, 30, step=7)
     st.divider()
-    if st.button("🔄 Refresh data", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
+    _last = last_scrape_time()
+    if _last:
+        st.caption(f"Last scraped: {_last[:16]} UTC")
+    else:
+        st.caption("No scrape recorded yet")
+    st.caption("Charts cache for 5 minutes")
 
 # ── Cached loaders ────────────────────────────────────────────────────────────
 

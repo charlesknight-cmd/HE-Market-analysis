@@ -105,6 +105,15 @@ def log_run(
         conn.commit()
 
 
+def last_scrape_time() -> str | None:
+    """Return the run_at timestamp of the most recent successful scrape, or None."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT run_at FROM scrape_runs WHERE status = 'ok' ORDER BY run_at DESC LIMIT 1"
+        ).fetchone()
+    return row["run_at"] if row else None
+
+
 def get_all_jobs() -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute("SELECT * FROM jobs ORDER BY first_seen DESC").fetchall()
