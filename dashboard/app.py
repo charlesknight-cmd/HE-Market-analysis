@@ -183,9 +183,9 @@ with t_overview:
     st.divider()
     col_l, col_r = st.columns(2)
     with col_l:
-        st.plotly_chart(daily_jobs_line(_daily(lookback_days)), use_container_width=True)
+        st.plotly_chart(daily_jobs_line(_daily(lookback_days)), use_container_width=True, key="daily_jobs")
     with col_r:
-        st.plotly_chart(category_weekly_bar(_cat_weekly(weeks)), use_container_width=True)
+        st.plotly_chart(category_weekly_bar(_cat_weekly(weeks)), use_container_width=True, key="cat_weekly")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TRENDS
@@ -194,22 +194,22 @@ with t_overview:
 with t_trends:
     st.info("Charts fill in as the database accumulates weeks of history.")
 
-    st.plotly_chart(category_share_area(_cat_share(weeks)), use_container_width=True)
+    st.plotly_chart(category_share_area(_cat_share(weeks)), use_container_width=True, key="cat_share")
     st.divider()
 
     col_l, col_r = st.columns(2)
     with col_l:
-        st.plotly_chart(seasonal_bar(_monthly(max(months, 3))), use_container_width=True)
+        st.plotly_chart(seasonal_bar(_monthly(max(months, 3))), use_container_width=True, key="seasonal")
     with col_r:
-        st.plotly_chart(salary_inflation_line(_salary_month(max(months, 3))), use_container_width=True)
+        st.plotly_chart(salary_inflation_line(_salary_month(max(months, 3))), use_container_width=True, key="salary_inflation")
 
     st.divider()
 
     col_l2, col_r2 = st.columns(2)
     with col_l2:
-        st.plotly_chart(contract_type_bar(_contract_trend(weeks)), use_container_width=True)
+        st.plotly_chart(contract_type_bar(_contract_trend(weeks)), use_container_width=True, key="contract_type")
     with col_r2:
-        st.plotly_chart(hours_bar(_hours_trend(weeks)), use_container_width=True)
+        st.plotly_chart(hours_bar(_hours_trend(weeks)), use_container_width=True, key="hours")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROLES
@@ -222,10 +222,11 @@ with t_roles:
         st.plotly_chart(
             title_frequency_bar(_title_freq(lookback_days)),
             use_container_width=True,
+            key="title_freq",
         )
 
     with col_r:
-        st.plotly_chart(category_growth_bar(_cat_growth()), use_container_width=True)
+        st.plotly_chart(category_growth_bar(_cat_growth()), use_container_width=True, key="cat_growth")
 
         growth = _cat_growth()
         if growth:
@@ -241,7 +242,7 @@ with t_roles:
 
     col_l2, col_r2 = st.columns(2)
     with col_l2:
-        st.plotly_chart(salary_box_by_category(_salary_trends(weeks)), use_container_width=True)
+        st.plotly_chart(salary_box_by_category(_salary_trends(weeks)), use_container_width=True, key="salary_box")
     with col_r2:
         sal = _salary_trends(weeks)
         if sal:
@@ -274,6 +275,7 @@ with t_institutions:
         st.plotly_chart(
             top_institutions_bar(_top_inst(lookback_days), lookback_days),
             use_container_width=True,
+            key="top_inst",
         )
 
     with col_r:
@@ -296,15 +298,16 @@ with t_institutions:
         st.plotly_chart(
             institution_salary_scatter(_salary_inst(lookback_days)),
             use_container_width=True,
+            key="inst_salary",
         )
     with col_r2:
-        st.plotly_chart(new_vs_repeat_bar(_new_vs_repeat(weeks)), use_container_width=True)
+        st.plotly_chart(new_vs_repeat_bar(_new_vs_repeat(weeks)), use_container_width=True, key="new_vs_repeat")
 
     st.divider()
 
     col_l3, col_r3 = st.columns(2)
     with col_l3:
-        st.plotly_chart(longevity_histogram(_longevity()), use_container_width=True)
+        st.plotly_chart(longevity_histogram(_longevity()), use_container_width=True, key="longevity")
         st.caption(
             "Days visible = gap between first and last time a job appeared in "
             "the RSS feed. Zero means seen in one scrape only. This is a proxy "
@@ -327,7 +330,7 @@ with t_institutions:
                     labels={"week": "ISO week", "job_count": "Jobs"},
                     title=f"{selected} — weekly postings",
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="inst_drill")
             breakdown = institution_category_breakdown(days=lookback_days)
             inst_rows = [r for r in breakdown if r["institution"] == selected]
             if inst_rows:
