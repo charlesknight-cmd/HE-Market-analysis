@@ -1,22 +1,32 @@
 #!/usr/bin/env bash
 # One-shot server setup for HE Job Market Analysis.
-# Run as root on a fresh Ubuntu 22.04 VM:
-#   curl -fsSL https://raw.githubusercontent.com/YOUR_REPO/main/deploy/setup.sh | bash
-# Or copy to the server and run: bash deploy/setup.sh
+#
+# Usage on a fresh Ubuntu 22.04 VM (run as root):
+#   REPO_URL=https://github.com/charlesknight-cmd/HE-Market-analysis.git \
+#   DOMAIN=jobs.charlesknight.co.uk \
+#   bash deploy/setup.sh
+#
+# DOMAIN is optional — if omitted the dashboard is reachable on port 8501 only.
+# A Cloudflare DNS A record pointing DOMAIN → this server's IP must exist first
+# (set to "DNS only" / grey cloud, not proxied).
 
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-}"          # set via env or edit below
+REPO_URL="${REPO_URL:-}"
+DOMAIN="${DOMAIN:-}"
 INSTALL_DIR="/opt/he-market-analysis"
-SERVICE_USER="ubuntu"             # default Hetzner/DigitalOcean user
+SERVICE_USER="root"     # Hetzner root-only servers; change to "ubuntu" on DigitalOcean etc.
 
 # ── 1. System packages ────────────────────────────────────────────────────────
 apt-get update -q
-apt-get install -y -q python3 python3-venv python3-pip git ufw
+apt-get install -y -q python3 python3-venv python3-pip git ufw nginx \
+    certbot python3-certbot-nginx
 
 # ── 2. Firewall ───────────────────────────────────────────────────────────────
 ufw allow OpenSSH
-ufw allow 8501/tcp   # Streamlit
+ufw allow 80/tcp    # HTTP (nginx)
+ufw allow 443/tcp   # HTTPS (nginx + certbot)
+ufw allow 8501/tcp  # Streamlit direct access (fallback)
 ufw --force enable
 
 # ── 3. Clone / update repo ────────────────────────────────────────────────────
@@ -26,7 +36,7 @@ if [ -d "$INSTALL_DIR/.git" ]; then
 else
     if [ -z "$REPO_URL" ]; then
         echo "ERROR: Set REPO_URL before running, e.g.:"
-        echo "  REPO_URL=https://github.com/you/he-market-analysis bash deploy/setup.sh"
+        echo "  REPO_URL=https://github.com/charlesknight-cmd/HE-Market-analysis.git bash deploy/setup.sh"
         exit 1
     fi
     git clone "$REPO_URL" "$INSTALL_DIR"
@@ -49,8 +59,7 @@ fi
 
 # ── 6. Initialise the database ────────────────────────────────────────────────
 cd "$INSTALL_DIR"
-"$INSTALL_DIR/venv/bin/python" -m db.schema 2>/dev/null || \
-    "$INSTALL_DIR/venv/bin/python" -c "from db.schema import init_db; init_db()"
+"$INSTALL_DIR/venv/bin/python" -c "from db.schema import init_db; init_db()"
 
 # ── 7. Run the scraper once now ───────────────────────────────────────────────
 "$INSTALL_DIR/venv/bin/python" -m scraper.run
@@ -69,10 +78,30 @@ systemctl daemon-reload
 systemctl enable he-market-dashboard
 systemctl restart he-market-dashboard
 
+# ── 10. nginx reverse proxy ───────────────────────────────────────────────────
+cp "$INSTALL_DIR/deploy/nginx.conf" /etc/nginx/sites-available/he-dashboard
+ln -sf /etc/nginx/sites-available/he-dashboard /etc/nginx/sites-enabled/he-dashboard
+rm -f /etc/nginx/sites-enabled/default
+nginx -t && systemctl reload nginx
+
+# ── 11. TLS certificate (only if DOMAIN is set) ───────────────────────────────
+if [ -n "$DOMAIN" ]; then
+    # Update the nginx config to use the actual domain
+    sed -i "s|jobs.charlesknight.co.uk|$DOMAIN|g" /etc/nginx/sites-available/he-dashboard
+    nginx -t && systemctl reload nginx
+    certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "admin@${DOMAIN#*.}"
+    echo "TLS certificate installed for $DOMAIN"
+else
+    echo "No DOMAIN set — skipping TLS. Dashboard reachable at http://$(curl -s ifconfig.me):8501"
+fi
+
 echo ""
 echo "================================================================"
-echo " Setup complete."
-echo " Dashboard: http://$(curl -s ifconfig.me):8501"
+if [ -n "$DOMAIN" ]; then
+    echo " Dashboard: https://$DOMAIN"
+else
+    echo " Dashboard: http://$(curl -s ifconfig.me):8501"
+fi
 echo " Scraper log: /var/log/he-market-scraper.log"
 echo " To check status: systemctl status he-market-dashboard"
 echo "================================================================"
