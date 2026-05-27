@@ -16,7 +16,12 @@ def upsert_job(conn: sqlite3.Connection, job: dict[str, Any]) -> str:
     Returns 'new' or 'updated'.
     """
     now = _now()
-    cur = conn.execute(
+    # Check existence before the upsert so the return value is race-condition-free
+    already_exists = conn.execute(
+        "SELECT 1 FROM jobs WHERE job_id = ?", (job["job_id"],)
+    ).fetchone() is not None
+
+    conn.execute(
         """
         INSERT INTO jobs
             (job_id, title, institution, department, salary_raw,
@@ -34,10 +39,7 @@ def upsert_job(conn: sqlite3.Connection, job: dict[str, Any]) -> str:
         """,
         {**job, "now": now},
     )
-    return "new" if cur.lastrowid and conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE job_id = ? AND first_seen = last_seen",
-        (job["job_id"],),
-    ).fetchone()[0] == 1 else "updated"
+    return "updated" if already_exists else "new"
 
 
 def bulk_upsert(jobs: list[dict[str, Any]]) -> tuple[int, int]:

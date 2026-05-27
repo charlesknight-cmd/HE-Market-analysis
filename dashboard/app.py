@@ -13,7 +13,13 @@ import pandas as pd
 import plotly.express as px
 
 from db.schema import init_db
-init_db()  # ensure schema and migrations are applied on every startup
+
+@st.cache_resource
+def _ensure_db() -> None:
+    """Run once per worker process — not on every Streamlit rerun."""
+    init_db()
+
+_ensure_db()
 
 from analysis.alerts import check_all
 from analysis.institutions import (
@@ -247,7 +253,7 @@ with t_roles:
         sal = _salary_trends(weeks)
         if sal:
             df_s = pd.DataFrame(sal)
-            df_s = df_s.groupby("category").last().reset_index()
+            df_s = df_s.sort_values("week").groupby("category").last().reset_index()
             df_s["category"] = df_s["category"].map(lambda s: CATEGORY_LABELS.get(s, s))
             df_s["avg_salary_min"] = df_s["avg_salary_min"].apply(
                 lambda x: f"£{x:,.0f}" if x else "—"

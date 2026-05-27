@@ -79,7 +79,8 @@ def parse_description(raw_desc: str) -> dict[str, str | None]:
         clean = _strip_tags(part)
         cl = clean.lower()
 
-        if re.match(r"salary\s*:", cl):
+        if salary_raw is None and re.match(r"salary\s*:", cl):
+            # Guard: only take the first Salary: line (mirrors the old break behaviour)
             salary_raw = re.sub(r"(?i)^salary\s*:\s*", "", clean).strip().rstrip(".")
 
         elif re.match(r"closing\s*date\s*:", cl):

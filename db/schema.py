@@ -67,8 +67,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         try:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {col_name} {col_type}")
             conn.commit()
-        except sqlite3.OperationalError:
-            pass  # Column already exists — nothing to do
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise  # unexpected error — don't swallow it
 
 
 def init_db() -> None:
