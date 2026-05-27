@@ -12,6 +12,9 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+from db.schema import init_db
+init_db()  # ensure schema and migrations are applied on every startup
+
 from analysis.alerts import check_all
 from analysis.institutions import (
     institution_category_breakdown,
