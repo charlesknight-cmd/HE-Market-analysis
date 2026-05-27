@@ -302,6 +302,58 @@ def longevity_histogram(rows: list[dict]) -> go.Figure:
     return fig
 
 
+def contract_type_bar(rows: list[dict]) -> go.Figure:
+    """Stacked bar: permanent vs fixed-term contracts per week."""
+    if not rows:
+        return _empty()
+    df = pd.DataFrame(rows)
+    colours = {"permanent": "#55A868", "fixed-term": "#DD8452", "flexible": "#8172B3"}
+    labels = {"permanent": "Permanent", "fixed-term": "Fixed-term", "flexible": "Flexible"}
+    fig = go.Figure()
+    for ctype in df["contract_type"].unique():
+        sub = df[df["contract_type"] == ctype].sort_values("week")
+        fig.add_trace(go.Bar(
+            x=sub["week"], y=sub["job_count"],
+            name=labels.get(ctype, ctype),
+            marker_color=colours.get(ctype, "#888"),
+            hovertemplate=f"{labels.get(ctype, ctype)}: %{{y}}<extra></extra>",
+        ))
+    fig.update_layout(
+        title="Permanent vs fixed-term contracts per week",
+        xaxis_title="ISO week", yaxis_title="Jobs",
+        barmode="stack",
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    )
+    return fig
+
+
+def hours_bar(rows: list[dict]) -> go.Figure:
+    """Stacked bar: full-time vs part-time vs flexible hours per week."""
+    if not rows:
+        return _empty()
+    df = pd.DataFrame(rows)
+    colours = {"full-time": "#4C72B0", "part-time": "#C44E52", "flexible": "#8172B3"}
+    labels = {"full-time": "Full-time", "part-time": "Part-time", "flexible": "Flexible"}
+    fig = go.Figure()
+    for htype in df["hours"].unique():
+        sub = df[df["hours"] == htype].sort_values("week")
+        fig.add_trace(go.Bar(
+            x=sub["week"], y=sub["job_count"],
+            name=labels.get(htype, htype),
+            marker_color=colours.get(htype, "#888"),
+            hovertemplate=f"{labels.get(htype, htype)}: %{{y}}<extra></extra>",
+        ))
+    fig.update_layout(
+        title="Full-time vs part-time jobs per week",
+        xaxis_title="ISO week", yaxis_title="Jobs",
+        barmode="stack",
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    )
+    return fig
+
+
 def new_vs_repeat_bar(rows: list[dict]) -> go.Figure:
     """Stacked bar: new vs returning institutions per week."""
     if not rows:

@@ -204,6 +204,48 @@ def job_longevity_distribution() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def contract_type_trend(weeks: int = 12) -> list[dict]:
+    """Weekly count of permanent vs fixed-term contracts."""
+    days = weeks * 7
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                strftime('%Y-W%W', {_CLEAN_TS}) AS week,
+                contract_type,
+                COUNT(*) AS job_count
+            FROM jobs
+            WHERE contract_type IS NOT NULL
+              AND {_CLEAN_TS} >= datetime('now', :offset)
+            GROUP BY week, contract_type
+            ORDER BY week, contract_type
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def hours_trend(weeks: int = 12) -> list[dict]:
+    """Weekly count of full-time vs part-time vs flexible jobs."""
+    days = weeks * 7
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                strftime('%Y-W%W', {_CLEAN_TS}) AS week,
+                hours,
+                COUNT(*) AS job_count
+            FROM jobs
+            WHERE hours IS NOT NULL
+              AND {_CLEAN_TS} >= datetime('now', :offset)
+            GROUP BY week, hours
+            ORDER BY week, hours
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def overall_summary() -> dict:
     """High-level counts for a quick status overview."""
     with get_connection() as conn:

@@ -5,18 +5,21 @@ from config import DB_PATH
 
 CREATE_JOBS = """
 CREATE TABLE IF NOT EXISTS jobs (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id      TEXT    UNIQUE NOT NULL,   -- e.g. "DRR304" from the jobs.ac.uk URL
-    title       TEXT    NOT NULL,
-    institution TEXT,
-    department  TEXT,
-    salary_raw  TEXT,                      -- raw string as it appears on site
-    salary_min  REAL,                      -- lower bound parsed to £
-    salary_max  REAL,                      -- upper bound parsed to £
-    category    TEXT,                      -- RSS feed category slug
-    url         TEXT    NOT NULL,
-    first_seen  TEXT    NOT NULL,          -- ISO-8601 datetime (UTC)
-    last_seen   TEXT    NOT NULL           -- ISO-8601 datetime (UTC)
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id        TEXT    UNIQUE NOT NULL,   -- e.g. "DRR304" from the jobs.ac.uk URL
+    title         TEXT    NOT NULL,
+    institution   TEXT,
+    department    TEXT,
+    salary_raw    TEXT,                      -- raw string as it appears on site
+    salary_min    REAL,                      -- lower bound parsed to £
+    salary_max    REAL,                      -- upper bound parsed to £
+    closing_date  TEXT,                      -- YYYY-MM-DD
+    contract_type TEXT,                      -- 'permanent' | 'fixed-term'
+    hours         TEXT,                      -- 'full-time' | 'part-time' | 'flexible'
+    category      TEXT,                      -- RSS feed category slug
+    url           TEXT    NOT NULL,
+    first_seen    TEXT    NOT NULL,          -- ISO-8601 datetime (UTC)
+    last_seen     TEXT    NOT NULL           -- ISO-8601 datetime (UTC)
 )
 """
 
@@ -34,10 +37,19 @@ CREATE TABLE IF NOT EXISTS scrape_runs (
 """
 
 CREATE_INDEXES = [
-    "CREATE INDEX IF NOT EXISTS idx_jobs_institution ON jobs (institution)",
-    "CREATE INDEX IF NOT EXISTS idx_jobs_category    ON jobs (category)",
-    "CREATE INDEX IF NOT EXISTS idx_jobs_first_seen  ON jobs (first_seen)",
-    "CREATE INDEX IF NOT EXISTS idx_jobs_last_seen   ON jobs (last_seen)",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_institution   ON jobs (institution)",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_category      ON jobs (category)",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_first_seen    ON jobs (first_seen)",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_last_seen     ON jobs (last_seen)",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_contract_type ON jobs (contract_type)",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_hours         ON jobs (hours)",
+]
+
+# Columns added after initial release — ALTER TABLE is safe to run repeatedly
+_MIGRATIONS = [
+    ("closing_date",  "TEXT"),
+    ("contract_type", "TEXT"),
+    ("hours",         "TEXT"),
 ]
 
 
@@ -49,11 +61,22 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add new columns to an existing database. Safe to run on a fresh DB too."""
+    for col_name, col_type in _MIGRATIONS:
+        try:
+            conn.execute(f"ALTER TABLE jobs ADD COLUMN {col_name} {col_type}")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Column already exists — nothing to do
+
+
 def init_db() -> None:
     with get_connection() as conn:
         conn.execute(CREATE_JOBS)
         conn.execute(CREATE_SCRAPE_RUNS)
         for idx in CREATE_INDEXES:
             conn.execute(idx)
+        _migrate(conn)
         conn.commit()
     print(f"Database ready at {DB_PATH}")

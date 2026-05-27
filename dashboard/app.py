@@ -25,7 +25,9 @@ from analysis.trends import (
     category_growth_wow,
     category_share_over_time,
     category_weekly_counts,
+    contract_type_trend,
     daily_new_jobs,
+    hours_trend,
     job_longevity_distribution,
     monthly_postings,
     overall_summary,
@@ -38,7 +40,9 @@ from dashboard.charts import (
     category_growth_bar,
     category_share_area,
     category_weekly_bar,
+    contract_type_bar,
     daily_jobs_line,
+    hours_bar,
     institution_salary_scatter,
     longevity_histogram,
     new_vs_repeat_bar,
@@ -129,6 +133,12 @@ def _salary_inst(d):        return salary_by_institution(days=d, min_jobs=2)
 def _new_vs_repeat(w):      return new_vs_repeat_institutions(weeks=w)
 
 @st.cache_data(ttl=300)
+def _contract_trend(w):     return contract_type_trend(weeks=w)
+
+@st.cache_data(ttl=300)
+def _hours_trend(w):        return hours_trend(weeks=w)
+
+@st.cache_data(ttl=300)
 def _all_jobs():            return get_all_jobs()
 
 weeks = max(1, lookback_days // 7)
@@ -189,6 +199,14 @@ with t_trends:
         st.plotly_chart(seasonal_bar(_monthly(max(months, 3))), use_container_width=True)
     with col_r:
         st.plotly_chart(salary_inflation_line(_salary_month(max(months, 3))), use_container_width=True)
+
+    st.divider()
+
+    col_l2, col_r2 = st.columns(2)
+    with col_l2:
+        st.plotly_chart(contract_type_bar(_contract_trend(weeks)), use_container_width=True)
+    with col_r2:
+        st.plotly_chart(hours_bar(_hours_trend(weeks)), use_container_width=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROLES

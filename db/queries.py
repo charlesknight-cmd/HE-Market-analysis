@@ -20,12 +20,17 @@ def upsert_job(conn: sqlite3.Connection, job: dict[str, Any]) -> str:
         """
         INSERT INTO jobs
             (job_id, title, institution, department, salary_raw,
-             salary_min, salary_max, category, url, first_seen, last_seen)
+             salary_min, salary_max, closing_date, contract_type, hours,
+             category, url, first_seen, last_seen)
         VALUES
             (:job_id, :title, :institution, :department, :salary_raw,
-             :salary_min, :salary_max, :category, :url, :now, :now)
+             :salary_min, :salary_max, :closing_date, :contract_type, :hours,
+             :category, :url, :now, :now)
         ON CONFLICT(job_id) DO UPDATE SET
-            last_seen = excluded.last_seen
+            last_seen     = excluded.last_seen,
+            closing_date  = COALESCE(excluded.closing_date,  closing_date),
+            contract_type = COALESCE(excluded.contract_type, contract_type),
+            hours         = COALESCE(excluded.hours,         hours)
         """,
         {**job, "now": now},
     )
@@ -49,18 +54,29 @@ def bulk_upsert(jobs: list[dict[str, Any]]) -> tuple[int, int]:
                     """
                     INSERT INTO jobs
                         (job_id, title, institution, department, salary_raw,
-                         salary_min, salary_max, category, url, first_seen, last_seen)
+                         salary_min, salary_max, closing_date, contract_type, hours,
+                         category, url, first_seen, last_seen)
                     VALUES
                         (:job_id, :title, :institution, :department, :salary_raw,
-                         :salary_min, :salary_max, :category, :url, :now, :now)
+                         :salary_min, :salary_max, :closing_date, :contract_type, :hours,
+                         :category, :url, :now, :now)
                     """,
                     {**job, "now": now},
                 )
                 new_count += 1
             else:
                 conn.execute(
-                    "UPDATE jobs SET last_seen = ? WHERE job_id = ?",
-                    (now, job["job_id"]),
+                    """
+                    UPDATE jobs SET
+                        last_seen     = ?,
+                        closing_date  = COALESCE(?, closing_date),
+                        contract_type = COALESCE(?, contract_type),
+                        hours         = COALESCE(?, hours)
+                    WHERE job_id = ?
+                    """,
+                    (now,
+                     job.get("closing_date"), job.get("contract_type"), job.get("hours"),
+                     job["job_id"]),
                 )
                 updated_count += 1
         conn.commit()
