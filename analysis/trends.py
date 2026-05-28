@@ -1,7 +1,8 @@
 """Time-series trend queries against the jobs database."""
 
 import re
-from collections import Counter
+import math
+from collections import Counter, defaultdict
 
 from db.schema import get_connection
 
@@ -269,3 +270,167 @@ def overall_summary() -> dict:
         "categories":   categories,
         "institutions": institutions,
     }
+
+
+def seasonal_heatmap_data() -> list[dict]:
+    """Return job counts grouped by calendar month number and category."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                strftime('%m', {_CLEAN_TS}) AS month_num,
+                category,
+                COUNT(*)                    AS job_count
+            FROM jobs
+            GROUP BY month_num, category
+            ORDER BY month_num, category
+            """
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def recruitment_window_trends(weeks: int = 24) -> list[dict]:
+    """Return average gap in days between closing_date and first_seen over time."""
+    days = weeks * 7
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                strftime('%Y-W%W', {_CLEAN_TS}) AS week,
+                ROUND(AVG(julianday(closing_date) - julianday(date({_CLEAN_TS}))), 1) AS avg_window_days,
+                COUNT(*) AS job_count
+            FROM jobs
+            WHERE closing_date IS NOT NULL
+              AND {_CLEAN_TS} >= datetime('now', :offset)
+            GROUP BY week
+            ORDER BY week
+            """,
+            {"offset": f"-{days} days"}
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def market_concentration_trends(weeks: int = 24) -> list[dict]:
+    """Calculate the Herfindahl-Hirschman Index (HHI) of institutions per week."""
+    days = weeks * 7
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                strftime('%Y-W%W', {_CLEAN_TS}) AS week,
+                institution,
+                COUNT(*) AS job_count
+            FROM jobs
+            WHERE institution IS NOT NULL
+              AND {_CLEAN_TS} >= datetime('now', :offset)
+            GROUP BY week, institution
+            ORDER BY week
+            """,
+            {"offset": f"-{days} days"}
+        ).fetchall()
+
+    weekly_counts = defaultdict(list)
+    for r in rows:
+        weekly_counts[r["week"]].append(r["job_count"])
+
+    hhi_trends = []
+    for week, counts in sorted(weekly_counts.items()):
+        total = sum(counts)
+        if total > 0:
+            hhi = sum(((count / total) * 100) ** 2 for count in counts)
+            hhi_trends.append({"week": week, "hhi": round(hhi, 1), "total_jobs": total})
+    return hhi_trends
+
+
+def _percentile(data: list[float], pct: float) -> float:
+    if not data:
+        return 0.0
+    sorted_data = sorted(data)
+    index = pct * (len(sorted_data) - 1)
+    lower = math.floor(index)
+    upper = math.ceil(index)
+    if lower == upper:
+        return sorted_data[int(index)]
+    return sorted_data[lower] * (upper - index) + sorted_data[upper] * (index - lower)
+
+
+def salary_percentile_trends(weeks: int = 24) -> list[dict]:
+    """Calculate 25th, 50th, and 75th percentiles of salary floors over time."""
+    days = weeks * 7
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                strftime('%Y-W%W', {_CLEAN_TS}) AS week,
+                salary_min
+            FROM jobs
+            WHERE salary_min IS NOT NULL
+              AND {_CLEAN_TS} >= datetime('now', :offset)
+            ORDER BY week
+            """,
+            {"offset": f"-{days} days"}
+        ).fetchall()
+
+    weekly_salaries = defaultdict(list)
+    for r in rows:
+        weekly_salaries[r["week"]].append(r["salary_min"])
+
+    trends = []
+    for week, salaries in sorted(weekly_salaries.items()):
+        if len(salaries) >= 3:
+            p25 = _percentile(salaries, 0.25)
+            p50 = _percentile(salaries, 0.50)
+            p75 = _percentile(salaries, 0.75)
+            trends.append({
+                "week": week,
+                "p25": round(p25, 0),
+                "p50": round(p50, 0),
+                "p75": round(p75, 0),
+                "n": len(salaries)
+            })
+    return trends
+
+
+def keyword_salary_premiums(days: int = 90, min_occurrences: int = 2) -> list[dict]:
+    """Calculate the percentage salary premium for top keywords in job titles relative to category baseline."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT title, salary_min, category
+            FROM jobs
+            WHERE salary_min IS NOT NULL
+              AND {_CLEAN_TS} >= datetime('now', :offset)
+            """,
+            {"offset": f"-{days} days"}
+        ).fetchall()
+
+    cat_salaries = defaultdict(list)
+    for r in rows:
+        cat_salaries[r["category"]].append(r["salary_min"])
+
+    cat_baselines = {}
+    for cat, salaries in cat_salaries.items():
+        cat_baselines[cat] = sum(salaries) / len(salaries)
+
+    keyword_data = defaultdict(list)
+    for r in rows:
+        title = r["title"] or ""
+        tokens = re.findall(r"\b[a-zA-Z][a-zA-Z]+\b", title)
+        unique_tokens = {t.lower() for t in tokens if t.lower() not in _STOPWORDS and len(t) > 2}
+        for token in unique_tokens:
+            baseline = cat_baselines.get(r["category"], r["salary_min"])
+            keyword_data[token].append((r["salary_min"], baseline))
+
+    premiums = []
+    for token, values in keyword_data.items():
+        if len(values) >= min_occurrences:
+            avg_premium = sum((sal / base) - 1 for sal, base in values) / len(values)
+            avg_salary = sum(sal for sal, _ in values) / len(values)
+            premiums.append({
+                "term": token,
+                "count": len(values),
+                "avg_salary": round(avg_salary, 0),
+                "premium_pct": round(avg_premium * 100, 1)
+            })
+
+    return sorted(premiums, key=lambda x: x["premium_pct"], reverse=True)

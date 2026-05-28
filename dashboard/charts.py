@@ -396,3 +396,179 @@ def new_vs_repeat_bar(rows: list[dict]) -> go.Figure:
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
     )
     return _style_fig(fig)
+
+
+def seasonal_heatmap(rows: list[dict]) -> go.Figure:
+    """Heatmap: job postings per month per category."""
+    if not rows:
+        return _empty()
+    df = pd.DataFrame(rows)
+    month_map = {
+        "01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr", "05": "May", "06": "Jun",
+        "07": "Jul", "08": "Aug", "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec"
+    }
+    df["month_label"] = df["month_num"].map(month_map)
+
+    # Pivot to create a 2D matrix
+    pivot = df.pivot(index="category", columns="month_label", values="job_count").fillna(0)
+
+    # Reorder columns to standard calendar year
+    month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    cols = [c for c in month_order if c in pivot.columns]
+    pivot = pivot[cols]
+
+    y_labels = [_label(c) for c in pivot.index]
+
+    fig = go.Figure(data=go.Heatmap(
+        z=pivot.values,
+        x=pivot.columns,
+        y=y_labels,
+        colorscale="Blues",
+        hovertemplate="Category: %{y}<br>Month: %{x}<br>Postings: %{z}<extra></extra>"
+    ))
+    fig.update_layout(
+        title="Postings Seasonality Heatmap",
+        xaxis_title="Month of Year",
+        yaxis_title="",
+    )
+    return _style_fig(fig)
+
+
+def recruitment_window_line(rows: list[dict]) -> go.Figure:
+    """Line: average days between posting and application closing."""
+    if not rows:
+        return _empty()
+    df = pd.DataFrame(rows).sort_values("week")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df["week"], y=df["avg_window_days"],
+        mode="lines+markers", name="Apply window",
+        line=dict(color="#4C72B0", width=2.5),
+        hovertemplate="Week %{x}<br>Avg Apply Window: %{y:.1f} days<extra></extra>"
+    ))
+    fig.update_layout(
+        title="Average Application Window Length (Days)",
+        xaxis_title="ISO Week",
+        yaxis_title="Days (Closing - Posted)",
+        hovermode="x unified",
+    )
+    return _style_fig(fig)
+
+
+def market_concentration_line(rows: list[dict]) -> go.Figure:
+    """Line: weekly recruiting HHI score indicating market diversity."""
+    if not rows:
+        return _empty()
+    df = pd.DataFrame(rows).sort_values("week")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df["week"], y=df["hhi"],
+        mode="lines+markers", name="HHI Index",
+        line=dict(color="#8172B3", width=2.5),
+        hovertemplate="Week %{x}<br>HHI Concentration: %{y}<br>Volume: %{customdata} jobs<extra></extra>",
+        customdata=df["total_jobs"]
+    ))
+    fig.add_hline(y=1500, line_dash="dash", line_color="green", annotation_text="Competitive (<1500)")
+    fig.add_hline(y=2500, line_dash="dash", line_color="orange", annotation_text="Concentrated (>2500)")
+    fig.update_layout(
+        title="Recruitment Concentration Index (HHI)",
+        xaxis_title="ISO Week",
+        yaxis_title="HHI Score",
+        hovermode="x unified",
+    )
+    return _style_fig(fig)
+
+
+def salary_percentile_bands(rows: list[dict]) -> go.Figure:
+    """Line with filled area: 25th–75th percentile salary floor bands."""
+    if not rows:
+        return _empty()
+    df = pd.DataFrame(rows).sort_values("week")
+    fig = go.Figure()
+    
+    # 25th percentile boundary (invisible line)
+    fig.add_trace(go.Scatter(
+        x=df["week"], y=df["p25"],
+        mode="lines", line=dict(width=0),
+        showlegend=False, hoverinfo="skip"
+    ))
+    
+    # 75th percentile boundary with fill to next trace (25th)
+    fig.add_trace(go.Scatter(
+        x=df["week"], y=df["p75"],
+        mode="lines", fill="tonexty",
+        fillcolor="rgba(76, 114, 176, 0.15)",
+        line=dict(width=0),
+        name="25th-75th Percentile Band",
+    ))
+    
+    # Median (50th percentile)
+    fig.add_trace(go.Scatter(
+        x=df["week"], y=df["p50"],
+        mode="lines+markers", name="Median Salary Floor",
+        line=dict(color="#4C72B0", width=2.5),
+        hovertemplate="Week %{x}<br>Median Floor: £%{y:,.0f}<extra></extra>"
+    ))
+    
+    fig.update_layout(
+        title="Salary Floor Distribution Bands over Time",
+        xaxis_title="ISO Week",
+        yaxis_title="Salary Floor (£)",
+        yaxis=dict(tickprefix="£", tickformat=","),
+        hovermode="x unified",
+    )
+    return _style_fig(fig)
+
+
+def keyword_premium_bar(rows: list[dict]) -> go.Figure:
+    """Horizontal bar: wage premium of words in job titles relative to category average."""
+    if not rows:
+        return _empty()
+    df = pd.DataFrame(rows).head(15).sort_values("premium_pct")
+    df["colour"] = df["premium_pct"].apply(lambda x: "#55A868" if x >= 0 else "#C44E52")
+    
+    fig = go.Figure(go.Bar(
+        x=df["premium_pct"], y=df["term"],
+        orientation="h",
+        marker_color=df["colour"],
+        text=df["premium_pct"].apply(lambda x: f"{x:+.1f}%"),
+        textposition="outside",
+        hovertemplate="Term: %{y}<br>Salary Premium: %{x:+.1f}%<br>Avg Salary: £%{customdata:,.0f}<extra></extra>",
+        customdata=df["avg_salary"]
+    ))
+    fig.update_layout(
+        title="Salary Premium by Title Keyword (vs. Category Baseline)",
+        xaxis_title="Salary Premium (%)",
+        yaxis_title="",
+        xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor="grey"),
+    )
+    return _style_fig(fig)
+
+
+def permanent_ratio_line(rows: list[dict]) -> go.Figure:
+    """Line: permanent contracts as a percentage share of weekly postings."""
+    if not rows:
+        return _empty()
+    df = pd.DataFrame(rows)
+    pivoted = df.pivot(index="week", columns="contract_type", values="job_count").fillna(0)
+    if "permanent" not in pivoted.columns:
+        pivoted["permanent"] = 0
+    totals = pivoted.sum(axis=1)
+    pivoted["ratio"] = (pivoted["permanent"] / totals * 100).round(1)
+    pivoted = pivoted.reset_index()
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=pivoted["week"], y=pivoted["ratio"],
+        mode="lines+markers", name="% Permanent",
+        line=dict(color="#55A868", width=2.5),
+        hovertemplate="Week %{x}<br>Permanent Jobs: %{y}%<extra></extra>"
+    ))
+    fig.update_layout(
+        title="Permanent Contract Share Trend (%)",
+        xaxis_title="ISO Week",
+        yaxis_title="Permanent Contracts (%)",
+        yaxis=dict(range=[0, 100]),
+        hovermode="x unified",
+    )
+    return _style_fig(fig)

@@ -43,6 +43,11 @@ from analysis.trends import (
     salary_by_month,
     salary_trends_by_category,
     title_word_frequency,
+    recruitment_window_trends,
+    market_concentration_trends,
+    salary_percentile_trends,
+    keyword_salary_premiums,
+    seasonal_heatmap_data,
 )
 from config import CATEGORY_LABELS
 from dashboard.charts import (
@@ -60,6 +65,12 @@ from dashboard.charts import (
     seasonal_bar,
     title_frequency_bar,
     top_institutions_bar,
+    seasonal_heatmap,
+    recruitment_window_line,
+    market_concentration_line,
+    salary_percentile_bands,
+    keyword_premium_bar,
+    permanent_ratio_line,
 )
 from db.queries import get_all_jobs, last_scrape_time
 
@@ -201,6 +212,21 @@ def _hours_trend(w):        return hours_trend(weeks=w)
 @st.cache_data(ttl=300)
 def _all_jobs():            return get_all_jobs()
 
+@st.cache_data(ttl=300)
+def _seasonal_heatmap():    return seasonal_heatmap_data()
+
+@st.cache_data(ttl=300)
+def _recruitment_window(w): return recruitment_window_trends(weeks=w)
+
+@st.cache_data(ttl=300)
+def _market_concentration(w): return market_concentration_trends(weeks=w)
+
+@st.cache_data(ttl=300)
+def _salary_percentiles(w): return salary_percentile_trends(weeks=w)
+
+@st.cache_data(ttl=300)
+def _keyword_premiums(d):   return keyword_salary_premiums(days=d)
+
 weeks = max(1, lookback_days // 7)
 months = max(1, lookback_days // 30)
 
@@ -257,6 +283,14 @@ with t_trends:
     st.info("Charts fill in as the database accumulates weeks of history.")
 
     st.plotly_chart(category_share_area(_cat_share(weeks)), use_container_width=True, key="cat_share")
+    
+    st.divider()
+    col_new_l, col_new_r = st.columns(2)
+    with col_new_l:
+        st.plotly_chart(salary_percentile_bands(_salary_percentiles(weeks)), use_container_width=True, key="salary_percentile_bands")
+    with col_new_r:
+        st.plotly_chart(seasonal_heatmap(_seasonal_heatmap()), use_container_width=True, key="seasonal_heatmap")
+
     st.divider()
 
     col_l, col_r = st.columns(2)
@@ -267,11 +301,16 @@ with t_trends:
 
     st.divider()
 
-    col_l2, col_r2 = st.columns(2)
+    col_l2, col_r2, col_c2 = st.columns(3)
     with col_l2:
         st.plotly_chart(contract_type_bar(_contract_trend(weeks)), use_container_width=True, key="contract_type")
     with col_r2:
+        st.plotly_chart(permanent_ratio_line(_contract_trend(weeks)), use_container_width=True, key="permanent_ratio")
+    with col_c2:
         st.plotly_chart(hours_bar(_hours_trend(weeks)), use_container_width=True, key="hours")
+
+    st.divider()
+    st.plotly_chart(recruitment_window_line(_recruitment_window(weeks)), use_container_width=True, key="recruitment_window")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROLES
@@ -326,6 +365,11 @@ with t_roles:
                 hide_index=True, use_container_width=True,
             )
 
+    st.divider()
+    st.subheader("Keyword Salary Premium Analysis")
+    st.caption("How much salary premium specific keywords in job titles command compared to their category baseline average.")
+    st.plotly_chart(keyword_premium_bar(_keyword_premiums(lookback_days)), use_container_width=True, key="keyword_premiums")
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # INSTITUTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -363,12 +407,14 @@ with t_institutions:
             key="inst_salary",
         )
     with col_r2:
-        st.plotly_chart(new_vs_repeat_bar(_new_vs_repeat(weeks)), use_container_width=True, key="new_vs_repeat")
+        st.plotly_chart(market_concentration_line(_market_concentration(weeks)), use_container_width=True, key="market_hhi")
 
     st.divider()
 
     col_l3, col_r3 = st.columns(2)
     with col_l3:
+        st.plotly_chart(new_vs_repeat_bar(_new_vs_repeat(weeks)), use_container_width=True, key="new_vs_repeat")
+    with col_r3:
         st.plotly_chart(longevity_histogram(_longevity()), use_container_width=True, key="longevity")
         st.caption(
             "Days visible = gap between first and last time a job appeared in "
@@ -376,14 +422,16 @@ with t_institutions:
             "for listing duration, not exact close date."
         )
 
-    with col_r3:
-        st.subheader("Institution drill-down")
-        all_jobs = _all_jobs()
-        institutions = sorted(
-            {j["institution"] for j in all_jobs if j["institution"]}, key=str.lower
-        )
-        selected = st.selectbox("Select an institution", institutions)
-        if selected:
+    st.divider()
+    st.subheader("Institution drill-down")
+    all_jobs = _all_jobs()
+    institutions = sorted(
+        {j["institution"] for j in all_jobs if j["institution"]}, key=str.lower
+    )
+    selected = st.selectbox("Select an institution", institutions)
+    if selected:
+        col_drill_l, col_drill_r = st.columns(2)
+        with col_drill_l:
             trend = institution_weekly_trend(selected, weeks=weeks)
             if trend:
                 df_t = pd.DataFrame(trend)
@@ -393,6 +441,7 @@ with t_institutions:
                     title=f"{selected} — weekly postings",
                 )
                 st.plotly_chart(fig, use_container_width=True, key="inst_drill")
+        with col_drill_r:
             breakdown = institution_category_breakdown(days=lookback_days)
             inst_rows = [r for r in breakdown if r["institution"] == selected]
             if inst_rows:
