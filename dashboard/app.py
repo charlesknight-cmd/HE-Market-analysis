@@ -65,14 +65,14 @@ from db.queries import get_all_jobs, last_scrape_time
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
-st.set_page_config(page_title="HE Job Market", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="HE Job Market Analysis", page_icon="📊", layout="wide")
 
 # ── Password gate ─────────────────────────────────────────────────────────────
 
 _required_pwd = st.secrets.get("password", "")
 if _required_pwd:
     if not st.session_state.get("authenticated"):
-        st.title("🎓 HE Job Market Analysis")
+        st.title("HE Job Market Analysis")
         pwd = st.text_input("Password", type="password")
         if pwd == _required_pwd:
             st.session_state.authenticated = True
@@ -81,8 +81,56 @@ if _required_pwd:
             st.error("Incorrect password.")
         st.stop()
 
-st.title("🎓 HE Job Market Analysis")
+st.title("HE Job Market Analysis")
 st.caption("Data sourced from jobs.ac.uk · refreshes daily at 07:00")
+
+# Inject premium visual custom CSS styles
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+    
+    html, body, [class*="css"], .stApp {
+        font-family: 'Outfit', sans-serif;
+    }
+    
+    h1, h2, h3 {
+        font-family: 'Outfit', sans-serif;
+        font-weight: 700 !important;
+        letter-spacing: -0.02em;
+    }
+    
+    /* Premium Styled metric cards */
+    div[data-testid="stMetric"] {
+        background: rgba(128, 128, 128, 0.04);
+        border: 1px solid rgba(128, 128, 128, 0.15);
+        border-radius: 16px;
+        padding: 20px 24px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.01);
+        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    }
+    
+    div[data-testid="stMetric"]:hover {
+        transform: translateY(-4px);
+        border-color: rgba(128, 128, 128, 0.3);
+        background: rgba(128, 128, 128, 0.08);
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.06);
+    }
+    
+    /* Styled Tab bar */
+    button[data-baseweb="tab"] {
+        font-weight: 500;
+        padding: 12px 24px;
+        border-radius: 8px 8px 0 0;
+        transition: all 0.2s ease;
+    }
+    
+    /* Active tab styling */
+    button[aria-selected="true"] {
+        background-color: rgba(76, 114, 176, 0.08) !important;
+        color: #4C72B0 !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 

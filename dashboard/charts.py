@@ -19,6 +19,22 @@ _NO_DATA_MSG = "Not enough data yet — check back as the database fills up"
 def _label(slug: str) -> str:
     return CATEGORY_LABELS.get(slug, slug)
 
+def _style_fig(fig: go.Figure) -> go.Figure:
+    """Applies modern transparent backgrounds and Outfit typography to charts."""
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Outfit, -apple-system, sans-serif"),
+    )
+    fig.update_xaxes(
+        gridcolor="rgba(128, 128, 128, 0.12)",
+    )
+    fig.update_yaxes(
+        gridcolor="rgba(128, 128, 128, 0.12)",
+    )
+    return fig
+
+
 def _empty(msg: str = _NO_DATA_MSG) -> go.Figure:
     fig = go.Figure()
     fig.update_layout(
@@ -27,7 +43,7 @@ def _empty(msg: str = _NO_DATA_MSG) -> go.Figure:
                        "x": 0.5, "y": 0.5, "showarrow": False,
                        "font": {"size": 14, "color": "grey"}}],
     )
-    return fig
+    return _style_fig(fig)
 
 
 # ── Overview charts ───────────────────────────────────────────────────────────
@@ -60,7 +76,7 @@ def daily_jobs_line(rows: list[dict]) -> go.Figure:
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
     )
-    return fig
+    return _style_fig(fig)
 
 
 def category_weekly_bar(rows: list[dict]) -> go.Figure:
@@ -78,7 +94,7 @@ def category_weekly_bar(rows: list[dict]) -> go.Figure:
     for trace in fig.data:
         trace.name = _label(trace.name)
     fig.update_layout(legend_title_text="Category", hovermode="x unified")
-    return fig
+    return _style_fig(fig)
 
 
 # ── Trends charts ─────────────────────────────────────────────────────────────
@@ -106,7 +122,7 @@ def category_share_area(rows: list[dict]) -> go.Figure:
         hovermode="x unified",
         legend_title_text="Category",
     )
-    return fig
+    return _style_fig(fig)
 
 
 def seasonal_bar(rows: list[dict]) -> go.Figure:
@@ -129,7 +145,7 @@ def seasonal_bar(rows: list[dict]) -> go.Figure:
         hovermode="x unified",
         xaxis=dict(tickangle=-45),
     )
-    return fig
+    return _style_fig(fig)
 
 
 def salary_inflation_line(rows: list[dict]) -> go.Figure:
@@ -154,7 +170,7 @@ def salary_inflation_line(rows: list[dict]) -> go.Figure:
         hovermode="x unified",
         legend_title_text="Category",
     )
-    return fig
+    return _style_fig(fig)
 
 
 # ── Roles charts ──────────────────────────────────────────────────────────────
@@ -177,7 +193,7 @@ def title_frequency_bar(rows: list[dict]) -> go.Figure:
         xaxis_title="Occurrences", yaxis_title="",
         margin=dict(l=120),
     )
-    return fig
+    return _style_fig(fig)
 
 
 def category_growth_bar(rows: list[dict]) -> go.Figure:
@@ -203,7 +219,7 @@ def category_growth_bar(rows: list[dict]) -> go.Figure:
         xaxis_title="Change (%)", yaxis_title="",
         xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor="grey"),
     )
-    return fig
+    return _style_fig(fig)
 
 
 def salary_box_by_category(rows: list[dict]) -> go.Figure:
@@ -238,7 +254,7 @@ def salary_box_by_category(rows: list[dict]) -> go.Figure:
         barmode="overlay",
         showlegend=False,
     )
-    return fig
+    return _style_fig(fig)
 
 
 # ── Institutions charts ───────────────────────────────────────────────────────
@@ -260,7 +276,7 @@ def top_institutions_bar(rows: list[dict], days: int) -> go.Figure:
         title=f"Top recruiting institutions (last {days} days)",
         xaxis_title="Jobs posted", yaxis_title="",
     )
-    return fig
+    return _style_fig(fig)
 
 
 def institution_salary_scatter(rows: list[dict]) -> go.Figure:
@@ -277,7 +293,7 @@ def institution_salary_scatter(rows: list[dict]) -> go.Figure:
     )
     fig.update_traces(textposition="top center")
     fig.update_layout(xaxis=dict(tickprefix="£", tickformat=","))
-    return fig
+    return _style_fig(fig)
 
 
 def longevity_histogram(rows: list[dict]) -> go.Figure:
@@ -299,7 +315,7 @@ def longevity_histogram(rows: list[dict]) -> go.Figure:
         yaxis_title="Number of jobs",
         bargap=0.1,
     )
-    return fig
+    return _style_fig(fig)
 
 
 def contract_type_bar(rows: list[dict]) -> go.Figure:
@@ -325,7 +341,7 @@ def contract_type_bar(rows: list[dict]) -> go.Figure:
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
     )
-    return fig
+    return _style_fig(fig)
 
 
 def hours_bar(rows: list[dict]) -> go.Figure:
@@ -351,7 +367,7 @@ def hours_bar(rows: list[dict]) -> go.Figure:
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
     )
-    return fig
+    return _style_fig(fig)
 
 
 def new_vs_repeat_bar(rows: list[dict]) -> go.Figure:
@@ -379,4 +395,4 @@ def new_vs_repeat_bar(rows: list[dict]) -> go.Figure:
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
     )
-    return fig
+    return _style_fig(fig)

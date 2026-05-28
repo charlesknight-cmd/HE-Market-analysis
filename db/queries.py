@@ -44,14 +44,22 @@ def upsert_job(conn: sqlite3.Connection, job: dict[str, Any]) -> str:
 
 def bulk_upsert(jobs: list[dict[str, Any]]) -> tuple[int, int]:
     """Upsert a list of job dicts. Returns (new_count, updated_count)."""
+    if not jobs:
+        return 0, 0
     now = _now()
     new_count = updated_count = 0
+    job_ids = [j["job_id"] for j in jobs]
+    
     with get_connection() as conn:
+        # Batch select existing job IDs to check what already exists
+        placeholders = ",".join("?" for _ in job_ids)
+        existing_rows = conn.execute(
+            f"SELECT job_id FROM jobs WHERE job_id IN ({placeholders})", job_ids
+        ).fetchall()
+        existing_set = {r["job_id"] for r in existing_rows}
+        
         for job in jobs:
-            existing = conn.execute(
-                "SELECT id FROM jobs WHERE job_id = ?", (job["job_id"],)
-            ).fetchone()
-            if existing is None:
+            if job["job_id"] not in existing_set:
                 conn.execute(
                     """
                     INSERT INTO jobs

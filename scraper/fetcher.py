@@ -1,5 +1,4 @@
-"""Fetch and parse one or all jobs.ac.uk RSS feeds."""
-
+import concurrent.futures
 import feedparser
 import requests
 
@@ -30,8 +29,18 @@ def fetch_category(slug: str, url: str) -> tuple[list[dict], str | None]:
 
 
 def fetch_all() -> dict[str, tuple[list[dict], str | None]]:
-    """Fetch every configured RSS feed. Returns {slug: (jobs, error)}."""
+    """Fetch every configured RSS feed concurrently. Returns {slug: (jobs, error)}."""
     results = {}
-    for slug, url in RSS_FEEDS.items():
-        results[slug] = fetch_category(slug, url)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(RSS_FEEDS)) as executor:
+        future_to_slug = {
+            executor.submit(fetch_category, slug, url): slug
+            for slug, url in RSS_FEEDS.items()
+        }
+        for future in concurrent.futures.as_completed(future_to_slug):
+            slug = future_to_slug[future]
+            try:
+                jobs, error = future.result()
+                results[slug] = (jobs, error)
+            except Exception as exc:
+                results[slug] = ([], str(exc))
     return results

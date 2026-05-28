@@ -76,8 +76,8 @@ def init_db() -> None:
     with get_connection() as conn:
         conn.execute(CREATE_JOBS)
         conn.execute(CREATE_SCRAPE_RUNS)
+        _migrate(conn)
         for idx in CREATE_INDEXES:
             conn.execute(idx)
-        _migrate(conn)
         conn.commit()
     print(f"Database ready at {DB_PATH}")

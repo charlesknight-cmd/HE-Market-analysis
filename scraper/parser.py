@@ -19,6 +19,8 @@ def _strip_tags(text: str) -> str:
 def _parse_closing_date(text: str) -> str | None:
     """Parse a closing date string to YYYY-MM-DD, or None if unparseable."""
     text = text.strip().rstrip(".")
+    # Remove ordinal suffixes from numbers (e.g. 15th -> 15, 1st -> 1, 22nd -> 22)
+    text = re.sub(r"\b(\d+)(?:st|nd|rd|th)\b", r"\1", text, flags=re.IGNORECASE)
     formats = ["%d %B %Y", "%d %b %Y", "%d/%m/%Y", "%d-%m-%Y", "%B %d, %Y"]
     for fmt in formats:
         try:
@@ -61,8 +63,10 @@ def parse_description(raw_desc: str) -> dict[str, str | None]:
     """
     desc = unescape(raw_desc or "")
 
-    # Split on <br> variants to get individual lines
-    parts = re.split(r"<br\s*/?>", desc, flags=re.IGNORECASE)
+    # Split on <br>, <p>, </p>, <div>, or </div> tags to handle multiple formatting styles
+    parts = re.split(r"<(?:br|p|/p|div|/div)\s*/?>", desc, flags=re.IGNORECASE)
+    # Filter out empty or whitespace-only lines
+    parts = [p.strip() for p in parts if p.strip()]
 
     institution = department = salary_raw = None
     closing_date = contract_type = hours = None
@@ -110,11 +114,18 @@ def parse_salary(salary_raw: str | None) -> tuple[float | None, float | None]:
     if not salary_raw:
         return None, None
 
+    # Detect if the salary refers to an hourly rate
+    is_hourly = any(x in salary_raw.lower() for x in ("hour", "hourly", "p/h", "per hr", "per hour"))
+
     amounts = re.findall(r"£([\d,]+)", salary_raw)
     values = []
     for a in amounts:
         try:
-            values.append(float(a.replace(",", "")))
+            val = float(a.replace(",", ""))
+            # Exclude hourly rates or clear outliers (under £10,000 annual)
+            if val < 10000 or is_hourly:
+                continue
+            values.append(val)
         except ValueError:
             pass
 
