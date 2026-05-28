@@ -227,15 +227,20 @@ with t_overview:
 
     alerts = _alerts()
     if alerts:
-        st.subheader(f"⚠️ Alerts ({len(alerts)})")
-        severity_icon = {"critical": "🔴", "warning": "🟡", "info": "🔵"}
+        st.subheader("💡 Key Market Insights")
+        meta = {
+            "critical": {"label": "Significant Surge", "icon": "🔥"},
+            "warning":  {"label": "Elevated Activity", "icon": "📈"},
+            "info":     {"label": "Market Trend",      "icon": "💡"}
+        }
         for a in alerts:
+            m = meta.get(a.severity, {"label": "Insight", "icon": "•"})
             msg = a.message
             for slug, label in CATEGORY_LABELS.items():
                 msg = msg.replace(slug, label)
-            st.warning(f"{severity_icon.get(a.severity, '•')} **{a.severity.upper()}** — {msg}")
+            st.info(f"{m['icon']} **{m['label']}** — {msg}")
     else:
-        st.success("✅ No alerts — nothing unusual detected.")
+        st.success("✅ No unusual activity or trends detected in this window.")
 
     st.divider()
     col_l, col_r = st.columns(2)

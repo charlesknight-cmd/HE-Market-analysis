@@ -48,16 +48,14 @@ def check_institution_spikes(days: int = 7) -> list[Alert]:
     alerts = []
     for row in candidates:
         severity: Severity = "critical" if row["job_count"] >= threshold * 2 else "warning"
-        cat_word = "category" if row["categories"] == 1 else "categories"
         alerts.append(
             Alert(
                 type="institution_spike",
                 severity=severity,
                 message=(
-                    f"{row['institution']} posted {row['job_count']} jobs "
-                    f"in the last {days} days "
-                    f"({row['categories']} {cat_word}: "
-                    f"{_friendly_cats(row['category_list'])})"
+                    f"{row['institution']} shows elevated recruitment activity, "
+                    f"posting {row['job_count']} new positions in the last {days} days "
+                    f"({_friendly_cats(row['category_list'])})"
                 ),
                 data=dict(row),
             )
@@ -76,16 +74,16 @@ def check_category_growth() -> list[Alert]:
             continue
         label = CATEGORY_LABELS.get(row["category"], row["category"])
         if abs(pct) >= threshold:
-            direction = "up" if pct > 0 else "down"
             severity: Severity = "warning" if abs(pct) >= threshold * 2 else "info"
+            if pct > 0:
+                message = f"{label} postings show strong week-on-week growth (+{pct:.1f}%, rising from {row['last_week']} to {row['this_week']} positions)"
+            else:
+                message = f"{label} postings show a week-on-week decrease ({pct:.1f}%, falling from {row['last_week']} to {row['this_week']} positions)"
             alerts.append(
                 Alert(
                     type="category_growth",
                     severity=severity,
-                    message=(
-                        f"{label} is {direction} {abs(pct):.1f}% week-on-week "
-                        f"({row['last_week']} → {row['this_week']} jobs)"
-                    ),
+                    message=message,
                     data=dict(row),
                 )
             )
@@ -104,9 +102,15 @@ def check_all() -> list[Alert]:
 
 def print_alerts(alerts: list[Alert]) -> None:
     if not alerts:
-        print("No alerts.")
+        print("No highlights.")
         return
-    markers = {"critical": "[!!]", "warning": "[! ]", "info": "[ i]"}
+    markers = {"critical": "🔥", "warning": "📈", "info": "💡"}
+    labels = {
+        "critical": "Significant Surge",
+        "warning": "Elevated Activity",
+        "info": "Market Trend",
+    }
     for a in alerts:
-        marker = markers.get(a.severity, "[  ]")
-        print(f"  {marker} [{a.severity.upper()}] {a.message}")
+        marker = markers.get(a.severity, "•")
+        lbl = labels.get(a.severity, a.severity.upper())
+        print(f"  {marker} [{lbl}] {a.message}")
