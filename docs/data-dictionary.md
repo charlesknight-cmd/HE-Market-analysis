@@ -15,8 +15,8 @@ One row per unique listing, keyed by `job_id`.
 | `institution` | TEXT | RSS desc (line 1, before ` - `) | 100% | Employer name. May be an overseas institution. |
 | `department` | TEXT | RSS desc (line 1, after ` - `) | ~75% | Faculty/department; absent when the listing has no ` - ` segment. |
 | `salary_raw` | TEXT | RSS desc (`Salary:` line) | ~83% | Verbatim salary string, e.g. `£41,519 to £46,618 per annum`. "Not specified" ⇒ NULL after parsing. |
-| `salary_min` | REAL | RSS parse, gap-filled from JSON-LD `baseSalary` | ~85% | Lower £ bound. Hourly/sub-£10k excluded. Enrichment fills gaps (GBP annual only) but never overwrites an RSS value. |
-| `salary_max` | REAL | RSS parse, gap-filled from JSON-LD `baseSalary` | ~85% | Upper £ bound; equals `salary_min` for single-value salaries. |
+| `salary_min` | REAL | RSS parse, gap-filled from JSON-LD `baseSalary` | ~83% | Lower £ bound. Hourly/sub-£10k excluded. Enrichment fills gaps (GBP annual only) but never overwrites an RSS value. In practice this adds little: jobs with no RSS salary usually have no structured salary either, and those that do are mostly non-GBP (International) and correctly skipped. |
+| `salary_max` | REAL | RSS parse, gap-filled from JSON-LD `baseSalary` | ~83% | Upper £ bound; equals `salary_min` for single-value salaries. |
 | `closing_date` | TEXT (YYYY-MM-DD) | detail-page JSON-LD (`validThrough`) | enriched | Populated by enrichment, not RSS. NULL until a job is enriched. |
 | `contract_type` | TEXT | detail-page JSON-LD (`employmentType`) | enriched | `permanent` / `fixed-term`. |
 | `hours` | TEXT | detail-page JSON-LD (`employmentType`) | enriched | `full-time` / `part-time` / `flexible`. |
