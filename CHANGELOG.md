@@ -33,6 +33,7 @@ All notable changes to this project are recorded here. Format loosely follows
 ### Changed
 - Split the long Trends tab into four nested sub-tabs — Volume & Seasonality,
   Pay, Contracts, Timing — so each view is ~3 charts instead of 12-deep scrolling.
+- Split the Roles tab into two nested sub-tabs — Role Types and Salaries.
 - Enrichment now also captures `date_posted` (JSON-LD `datePosted`) and fills
   salary gaps from JSON-LD `baseSalary` (GBP, annual, ≥£10k; gap-fill only, never
   overwriting an RSS-parsed value). Recruitment-window chart now measures the true

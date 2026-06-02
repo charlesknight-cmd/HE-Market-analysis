@@ -385,43 +385,38 @@ with t_trends:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with t_roles:
-    col_sen, col_dist = st.columns(2)
-    with col_sen:
-        st.plotly_chart(seniority_breakdown_bar(_seniority(max(lookback_days, 365))), width='stretch', key="seniority")
-        st.caption("Seniority inferred from title keywords; hover a bar for the median salary floor.")
-    with col_dist:
-        st.plotly_chart(salary_distribution_hist(_salary_dist(lookback_days)), width='stretch', key="salary_dist")
+    sub_roletypes, sub_salaries = st.tabs(["Role Types", "Salaries"])
 
-    st.divider()
+    with sub_roletypes:
+        col_rt1, col_rt2 = st.columns(2)
+        with col_rt1:
+            st.plotly_chart(seniority_breakdown_bar(_seniority(max(lookback_days, 365))), width='stretch', key="seniority")
+            st.caption("Seniority inferred from title keywords; hover a bar for the median salary floor.")
+        with col_rt2:
+            st.plotly_chart(title_frequency_bar(_title_freq(lookback_days)), width='stretch', key="title_freq")
 
-    col_l, col_r = st.columns(2)
+        st.divider()
+        col_g1, col_g2 = st.columns(2)
+        with col_g1:
+            st.plotly_chart(category_growth_bar(_cat_growth()), width='stretch', key="cat_growth")
+        with col_g2:
+            growth = _cat_growth()
+            if growth:
+                df_g = pd.DataFrame(growth)
+                df_g["category"] = df_g["category"].map(lambda s: CATEGORY_LABELS.get(s, s))
+                df_g = df_g.rename(columns={
+                    "category": "Category", "last_week": "Last week",
+                    "this_week": "This week", "change_pct": "Change %",
+                })
+                st.dataframe(df_g, hide_index=True, width='stretch')
 
-    with col_l:
-        st.plotly_chart(
-            title_frequency_bar(_title_freq(lookback_days)),
-            width='stretch',
-            key="title_freq",
-        )
+    with sub_salaries:
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            st.plotly_chart(salary_distribution_hist(_salary_dist(lookback_days)), width='stretch', key="salary_dist")
+        with col_s2:
+            st.plotly_chart(salary_box_by_category(_salary_trends(weeks)), width='stretch', key="salary_box")
 
-    with col_r:
-        st.plotly_chart(category_growth_bar(_cat_growth()), width='stretch', key="cat_growth")
-
-        growth = _cat_growth()
-        if growth:
-            df_g = pd.DataFrame(growth)
-            df_g["category"] = df_g["category"].map(lambda s: CATEGORY_LABELS.get(s, s))
-            df_g = df_g.rename(columns={
-                "category": "Category", "last_week": "Last week",
-                "this_week": "This week", "change_pct": "Change %",
-            })
-            st.dataframe(df_g, hide_index=True, width='stretch')
-
-    st.divider()
-
-    col_l2, col_r2 = st.columns(2)
-    with col_l2:
-        st.plotly_chart(salary_box_by_category(_salary_trends(weeks)), width='stretch', key="salary_box")
-    with col_r2:
         sal = _salary_trends(weeks)
         if sal:
             df_s = pd.DataFrame(sal)
@@ -442,14 +437,14 @@ with t_roles:
                 hide_index=True, width='stretch',
             )
 
-    st.divider()
-    st.plotly_chart(salary_by_contract_bar(_salary_contract(lookback_days)), width='stretch', key="salary_contract")
-    st.caption("Median advertised salary floor for permanent vs fixed-term roles (contract type from enrichment).")
+        st.divider()
+        st.plotly_chart(salary_by_contract_bar(_salary_contract(lookback_days)), width='stretch', key="salary_contract")
+        st.caption("Median advertised salary floor for permanent vs fixed-term roles (contract type from enrichment).")
 
-    st.divider()
-    st.subheader("Keyword Salary Premium Analysis")
-    st.caption("How much salary premium specific keywords in job titles command compared to their category baseline average.")
-    st.plotly_chart(keyword_premium_bar(_keyword_premiums(lookback_days)), width='stretch', key="keyword_premiums")
+        st.divider()
+        st.subheader("Keyword Salary Premium Analysis")
+        st.caption("How much salary premium specific keywords in job titles command compared to their category baseline average.")
+        st.plotly_chart(keyword_premium_bar(_keyword_premiums(lookback_days)), width='stretch', key="keyword_premiums")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INSTITUTIONS
