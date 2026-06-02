@@ -451,98 +451,96 @@ with t_roles:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with t_institutions:
-    col_l, col_r = st.columns([3, 2])
-
-    with col_l:
-        st.plotly_chart(
-            top_institutions_bar(_top_inst(lookback_days), lookback_days),
-            width='stretch',
-            key="top_inst",
-        )
-
-    with col_r:
-        st.subheader("Spike watch (last 7 days, >= 3 jobs)")
-        spikes = _spikes(lookback_days)
-        if spikes:
-            df_sp = pd.DataFrame(spikes)[["institution", "job_count", "category_list"]]
-            df_sp["category_list"] = df_sp["category_list"].apply(
-                lambda s: ", ".join(CATEGORY_LABELS.get(c.strip(), c.strip()) for c in s.split(","))
-            )
-            df_sp.columns = ["Institution", "Jobs", "Categories"]
-            st.dataframe(df_sp, hide_index=True, width='stretch')
-        else:
-            st.info("No spikes detected in this window.")
-
-    st.divider()
-    st.subheader("Geography")
-    col_geo_l, col_geo_r = st.columns(2)
-    with col_geo_l:
-        st.plotly_chart(region_choropleth(_region(lookback_days)), width='stretch', key="region_map")
-    with col_geo_r:
-        st.plotly_chart(region_bar(_region(lookback_days)), width='stretch', key="region")
-
-    col_geo_l2, col_geo_r2 = st.columns(2)
-    with col_geo_l2:
-        st.plotly_chart(top_locations_bar(_top_locations(lookback_days)), width='stretch', key="top_locations")
-    with col_geo_r2:
-        st.plotly_chart(salary_by_region_bar(_salary_region(lookback_days)), width='stretch', key="salary_region")
-
-    st.plotly_chart(region_category_heatmap(_region_matrix(lookback_days)), width='stretch', key="region_category")
-    st.caption("Location and salary are parsed from each job's detail page. The map and bar cover UK nations; "
-               "International roles appear in the bar but not the map.")
-
-    st.divider()
-
-    col_l2, col_r2 = st.columns(2)
-    with col_l2:
-        st.plotly_chart(
-            institution_salary_scatter(_salary_inst(lookback_days)),
-            width='stretch',
-            key="inst_salary",
-        )
-    with col_r2:
-        st.plotly_chart(market_concentration_line(_market_concentration(weeks)), width='stretch', key="market_hhi")
-
-    st.divider()
-
-    col_l3, col_r3 = st.columns(2)
-    with col_l3:
-        st.plotly_chart(new_vs_repeat_bar(_new_vs_repeat(weeks)), width='stretch', key="new_vs_repeat")
-    with col_r3:
-        st.plotly_chart(longevity_histogram(_longevity()), width='stretch', key="longevity")
-        st.caption(
-            "Days visible = gap between first and last time a job appeared in "
-            "the RSS feed. Zero means seen in one scrape only. This is a proxy "
-            "for listing duration, not exact close date."
-        )
-
-    st.divider()
-    st.subheader("Institution drill-down")
-    all_jobs = _all_jobs()
-    institutions = sorted(
-        {j["institution"] for j in all_jobs if j["institution"]}, key=str.lower
+    sub_recruiters, sub_geography, sub_dynamics = st.tabs(
+        ["Recruiters", "Geography", "Dynamics"]
     )
-    selected = st.selectbox("Select an institution", institutions)
-    if selected:
-        col_drill_l, col_drill_r = st.columns(2)
-        with col_drill_l:
-            trend = institution_weekly_trend(selected, weeks=weeks)
-            if trend:
-                df_t = pd.DataFrame(trend)
-                fig = px.bar(
-                    df_t, x="week", y="job_count",
-                    labels={"week": "ISO week", "job_count": "Jobs"},
-                    title=f"{selected} — weekly postings",
+
+    with sub_recruiters:
+        col_l, col_r = st.columns([3, 2])
+        with col_l:
+            st.plotly_chart(
+                top_institutions_bar(_top_inst(lookback_days), lookback_days),
+                width='stretch', key="top_inst",
+            )
+        with col_r:
+            st.subheader("Spike watch (last 7 days, >= 3 jobs)")
+            spikes = _spikes(lookback_days)
+            if spikes:
+                df_sp = pd.DataFrame(spikes)[["institution", "job_count", "category_list"]]
+                df_sp["category_list"] = df_sp["category_list"].apply(
+                    lambda s: ", ".join(CATEGORY_LABELS.get(c.strip(), c.strip()) for c in s.split(","))
                 )
-                st.plotly_chart(fig, width='stretch', key="inst_drill")
-        with col_drill_r:
-            breakdown = institution_category_breakdown(days=lookback_days)
-            inst_rows = [r for r in breakdown if r["institution"] == selected]
-            if inst_rows:
-                df_b = pd.DataFrame(inst_rows)[["category", "job_count"]]
-                df_b["category"] = df_b["category"].map(lambda s: CATEGORY_LABELS.get(s, s))
-                df_b.columns = ["Category", "Jobs"]
-                st.dataframe(df_b, hide_index=True, width='stretch')
+                df_sp.columns = ["Institution", "Jobs", "Categories"]
+                st.dataframe(df_sp, hide_index=True, width='stretch')
+            else:
+                st.info("No spikes detected in this window.")
+
+        st.divider()
+        st.subheader("Institution drill-down")
+        all_jobs = _all_jobs()
+        institutions = sorted(
+            {j["institution"] for j in all_jobs if j["institution"]}, key=str.lower
+        )
+        selected = st.selectbox("Select an institution", institutions)
+        if selected:
+            col_drill_l, col_drill_r = st.columns(2)
+            with col_drill_l:
+                trend = institution_weekly_trend(selected, weeks=weeks)
+                if trend:
+                    df_t = pd.DataFrame(trend)
+                    fig = px.bar(
+                        df_t, x="week", y="job_count",
+                        labels={"week": "ISO week", "job_count": "Jobs"},
+                        title=f"{selected} — weekly postings",
+                    )
+                    st.plotly_chart(fig, width='stretch', key="inst_drill")
+            with col_drill_r:
+                breakdown = institution_category_breakdown(days=lookback_days)
+                inst_rows = [r for r in breakdown if r["institution"] == selected]
+                if inst_rows:
+                    df_b = pd.DataFrame(inst_rows)[["category", "job_count"]]
+                    df_b["category"] = df_b["category"].map(lambda s: CATEGORY_LABELS.get(s, s))
+                    df_b.columns = ["Category", "Jobs"]
+                    st.dataframe(df_b, hide_index=True, width='stretch')
+
+    with sub_geography:
+        col_geo_l, col_geo_r = st.columns(2)
+        with col_geo_l:
+            st.plotly_chart(region_choropleth(_region(lookback_days)), width='stretch', key="region_map")
+        with col_geo_r:
+            st.plotly_chart(region_bar(_region(lookback_days)), width='stretch', key="region")
+
+        col_geo_l2, col_geo_r2 = st.columns(2)
+        with col_geo_l2:
+            st.plotly_chart(top_locations_bar(_top_locations(lookback_days)), width='stretch', key="top_locations")
+        with col_geo_r2:
+            st.plotly_chart(salary_by_region_bar(_salary_region(lookback_days)), width='stretch', key="salary_region")
+
+        st.plotly_chart(region_category_heatmap(_region_matrix(lookback_days)), width='stretch', key="region_category")
+        st.caption("Location and salary are parsed from each job's detail page. The map and bar cover UK nations; "
+                   "International roles appear in the bar but not the map.")
+
+    with sub_dynamics:
+        col_l2, col_r2 = st.columns(2)
+        with col_l2:
+            st.plotly_chart(
+                institution_salary_scatter(_salary_inst(lookback_days)),
+                width='stretch', key="inst_salary",
+            )
+        with col_r2:
+            st.plotly_chart(market_concentration_line(_market_concentration(weeks)), width='stretch', key="market_hhi")
+
+        st.divider()
+        col_l3, col_r3 = st.columns(2)
+        with col_l3:
+            st.plotly_chart(new_vs_repeat_bar(_new_vs_repeat(weeks)), width='stretch', key="new_vs_repeat")
+        with col_r3:
+            st.plotly_chart(longevity_histogram(_longevity()), width='stretch', key="longevity")
+            st.caption(
+                "Days visible = gap between first and last time a job appeared in "
+                "the RSS feed. Zero means seen in one scrape only. This is a proxy "
+                "for listing duration, not exact close date."
+            )
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DATA
