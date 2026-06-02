@@ -6,13 +6,22 @@ import pandas as pd
 from config import CATEGORY_LABELS
 
 _PALETTE = {
-    "academic-or-research":       "#4C72B0",
-    "professional-or-managerial": "#DD8452",
-    "technical":                  "#55A868",
-    "clerical":                   "#C44E52",
-    "further-education":          "#8172B3",
-    "craft-or-manual":            "#937860",
+    "academic-or-research":       "#4361EE",
+    "professional-or-managerial": "#F77F00",
+    "technical":                  "#06A77D",
+    "clerical":                   "#E5383B",
+    "further-education":          "#7209B7",
+    "craft-or-manual":            "#8D6E63",
 }
+
+# Shared accents used by single-series charts and positive/negative bars.
+_ACCENT = "#4361EE"
+_POS = "#06A77D"
+_NEG = "#E5383B"
+
+_INK = "#1A1A2E"
+_GRID = "rgba(26, 26, 46, 0.07)"
+_FONT = "Outfit, -apple-system, sans-serif"
 
 _NO_DATA_MSG = "Not enough data yet — check back as the database fills up"
 
@@ -20,17 +29,32 @@ def _label(slug: str) -> str:
     return CATEGORY_LABELS.get(slug, slug)
 
 def _style_fig(fig: go.Figure) -> go.Figure:
-    """Applies modern transparent backgrounds and Outfit typography to charts."""
+    """Applies a cohesive light theme, large readable type, and polished hover."""
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(family="Outfit, -apple-system, sans-serif"),
+        font=dict(family=_FONT, size=14, color=_INK),
+        title=dict(
+            font=dict(family=_FONT, size=20, color=_INK),
+            x=0.01, xanchor="left", y=0.96, yanchor="top",
+            pad=dict(b=14),
+        ),
+        margin=dict(l=64, r=28, t=72, b=56),
+        colorway=list(_PALETTE.values()),
+        hoverlabel=dict(
+            bgcolor="white",
+            bordercolor="rgba(26, 26, 46, 0.12)",
+            font=dict(family=_FONT, size=13, color=_INK),
+        ),
+        legend=dict(font=dict(size=12, color=_INK)),
     )
     fig.update_xaxes(
-        gridcolor="rgba(128, 128, 128, 0.12)",
+        gridcolor=_GRID, zerolinecolor=_GRID, linecolor=_GRID,
+        title_font=dict(size=13, color=_INK), tickfont=dict(size=12, color=_INK),
     )
     fig.update_yaxes(
-        gridcolor="rgba(128, 128, 128, 0.12)",
+        gridcolor=_GRID, zerolinecolor=_GRID, linecolor=_GRID,
+        title_font=dict(size=13, color=_INK), tickfont=dict(size=12, color=_INK),
     )
     return fig
 
@@ -61,13 +85,13 @@ def daily_jobs_line(rows: list[dict]) -> go.Figure:
     fig.add_trace(go.Scatter(
         x=df["day"], y=df["job_count"],
         mode="lines+markers", name="Daily",
-        line=dict(color="#4C72B0", width=1.5), opacity=0.5,
+        line=dict(color=_ACCENT, width=1.5), opacity=0.5,
     ))
     if len(df) >= 3:
         fig.add_trace(go.Scatter(
             x=df["day"], y=df["rolling_7d"],
             mode="lines", name="7-day avg",
-            line=dict(color="#DD8452", width=2.5),
+            line=dict(color="#F77F00", width=2.5),
         ))
     fig.update_layout(
         title="New job postings per day",
@@ -183,7 +207,7 @@ def title_frequency_bar(rows: list[dict]) -> go.Figure:
     fig = go.Figure(go.Bar(
         x=df["count"], y=df["term"],
         orientation="h",
-        marker_color="#4C72B0",
+        marker_color=_ACCENT,
         text=df["count"],
         textposition="outside",
         hovertemplate="%{y}: %{x} occurrences<extra></extra>",
@@ -204,7 +228,7 @@ def category_growth_bar(rows: list[dict]) -> go.Figure:
     if df.empty:
         return _empty("No week-on-week data yet (need 2+ weeks)")
     df["label"] = df["category"].map(_label)
-    df["colour"] = df["change_pct"].apply(lambda x: "#55A868" if x >= 0 else "#C44E52")
+    df["colour"] = df["change_pct"].apply(lambda x: _POS if x >= 0 else _NEG)
     df = df.sort_values("change_pct")
     fig = go.Figure(go.Bar(
         x=df["change_pct"], y=df["label"],
@@ -267,7 +291,7 @@ def top_institutions_bar(rows: list[dict], days: int) -> go.Figure:
     fig = go.Figure(go.Bar(
         x=df["job_count"], y=df["institution"],
         orientation="h",
-        marker_color="#4C72B0",
+        marker_color=_ACCENT,
         text=df["job_count"],
         textposition="outside",
         hovertemplate="%{y}: %{x} jobs<extra></extra>",
@@ -306,7 +330,7 @@ def longevity_histogram(rows: list[dict]) -> go.Figure:
         return _empty()
     fig = go.Figure(go.Bar(
         x=df["days_visible"], y=df["job_count"],
-        marker_color="#4C72B0",
+        marker_color=_ACCENT,
         hovertemplate="Visible %{x} day(s): %{y} jobs<extra></extra>",
     ))
     fig.update_layout(
@@ -323,7 +347,7 @@ def contract_type_bar(rows: list[dict]) -> go.Figure:
     if not rows:
         return _empty()
     df = pd.DataFrame(rows)
-    colours = {"permanent": "#55A868", "fixed-term": "#DD8452", "flexible": "#8172B3"}
+    colours = {"permanent": _POS, "fixed-term": "#F77F00", "flexible": "#7209B7"}
     labels = {"permanent": "Permanent", "fixed-term": "Fixed-term", "flexible": "Flexible"}
     fig = go.Figure()
     for ctype in df["contract_type"].unique():
@@ -349,7 +373,7 @@ def hours_bar(rows: list[dict]) -> go.Figure:
     if not rows:
         return _empty()
     df = pd.DataFrame(rows)
-    colours = {"full-time": "#4C72B0", "part-time": "#C44E52", "flexible": "#8172B3"}
+    colours = {"full-time": _ACCENT, "part-time": _NEG, "flexible": "#7209B7"}
     labels = {"full-time": "Full-time", "part-time": "Part-time", "flexible": "Flexible"}
     fig = go.Figure()
     for htype in df["hours"].unique():
@@ -379,13 +403,13 @@ def new_vs_repeat_bar(rows: list[dict]) -> go.Figure:
     fig.add_trace(go.Bar(
         x=df["week"], y=df["new_count"],
         name="First-time recruiters",
-        marker_color="#55A868",
+        marker_color=_POS,
         hovertemplate="Week %{x}<br>First-time: %{y}<extra></extra>",
     ))
     fig.add_trace(go.Bar(
         x=df["week"], y=df["repeat_count"],
         name="Returning recruiters",
-        marker_color="#4C72B0",
+        marker_color=_ACCENT,
         hovertemplate="Week %{x}<br>Returning: %{y}<extra></extra>",
     ))
     fig.update_layout(
@@ -443,7 +467,7 @@ def recruitment_window_line(rows: list[dict]) -> go.Figure:
     fig.add_trace(go.Scatter(
         x=df["week"], y=df["avg_window_days"],
         mode="lines+markers", name="Apply window",
-        line=dict(color="#4C72B0", width=2.5),
+        line=dict(color=_ACCENT, width=2.5),
         hovertemplate="Week %{x}<br>Avg Apply Window: %{y:.1f} days<extra></extra>"
     ))
     fig.update_layout(
@@ -464,7 +488,7 @@ def market_concentration_line(rows: list[dict]) -> go.Figure:
     fig.add_trace(go.Scatter(
         x=df["week"], y=df["hhi"],
         mode="lines+markers", name="HHI Index",
-        line=dict(color="#8172B3", width=2.5),
+        line=dict(color="#7209B7", width=2.5),
         hovertemplate="Week %{x}<br>HHI Concentration: %{y}<br>Volume: %{customdata} jobs<extra></extra>",
         customdata=df["total_jobs"]
     ))
@@ -506,7 +530,7 @@ def salary_percentile_bands(rows: list[dict]) -> go.Figure:
     fig.add_trace(go.Scatter(
         x=df["week"], y=df["p50"],
         mode="lines+markers", name="Median Salary Floor",
-        line=dict(color="#4C72B0", width=2.5),
+        line=dict(color=_ACCENT, width=2.5),
         hovertemplate="Week %{x}<br>Median Floor: £%{y:,.0f}<extra></extra>"
     ))
     
@@ -525,7 +549,7 @@ def keyword_premium_bar(rows: list[dict]) -> go.Figure:
     if not rows:
         return _empty()
     df = pd.DataFrame(rows).head(15).sort_values("premium_pct")
-    df["colour"] = df["premium_pct"].apply(lambda x: "#55A868" if x >= 0 else "#C44E52")
+    df["colour"] = df["premium_pct"].apply(lambda x: _POS if x >= 0 else _NEG)
     
     fig = go.Figure(go.Bar(
         x=df["premium_pct"], y=df["term"],
@@ -561,7 +585,7 @@ def permanent_ratio_line(rows: list[dict]) -> go.Figure:
     fig.add_trace(go.Scatter(
         x=pivoted["week"], y=pivoted["ratio"],
         mode="lines+markers", name="% Permanent",
-        line=dict(color="#55A868", width=2.5),
+        line=dict(color=_POS, width=2.5),
         hovertemplate="Week %{x}<br>Permanent Jobs: %{y}%<extra></extra>"
     ))
     fig.update_layout(

@@ -5,3 +5,11 @@ address = "0.0.0.0"
 
 [browser]
 gatherUsageStats = false
+
+[theme]
+base = "light"
+primaryColor = "#4361EE"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F6FB"
+textColor = "#1A1A2E"
+font = "sans serif"
