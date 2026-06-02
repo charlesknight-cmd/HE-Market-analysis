@@ -25,10 +25,13 @@ def main() -> None:
                         help="Max jobs to enrich this run (default: all pending)")
     parser.add_argument("--delay", type=float, default=1.5,
                         help="Seconds to wait between requests (default: 1.5)")
+    parser.add_argument("--all", action="store_true",
+                        help="Re-fetch jobs missing date_posted (one-off field backfill), "
+                             "not just never-enriched ones")
     args = parser.parse_args()
 
-    init_db()  # ensure the location/region/enriched_at columns exist
-    stats = run_enrichment(limit=args.limit, delay=args.delay)
+    init_db()  # ensure the enrichment columns exist
+    stats = run_enrichment(limit=args.limit, delay=args.delay, reenrich=args.all)
     print(f"\n{stats['attempted']} attempted, "
           f"{stats['enriched']} enriched, {stats['failed']} failed.")
 

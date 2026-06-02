@@ -12,7 +12,14 @@ from scraper.detail import (
     _extract_jobposting,
     _iso_to_date,
     _parse_location,
+    _parse_basesalary,
 )
+
+
+def _salary(currency="GBP", unit="YEAR", mn="40000", mx="50000"):
+    return {"baseSalary": {"@type": "MonetaryAmount", "currency": currency,
+            "value": {"@type": "StructuredValue", "unitText": unit,
+                      "minValue": mn, "maxValue": mx}}}
 
 
 def _page(jobposting: dict) -> str:
@@ -80,15 +87,38 @@ class TestParseLocation:
         assert _parse_location({"title": "x"}) == (None, None)
 
 
+class TestParseBaseSalary:
+    def test_annual_gbp(self):
+        assert _parse_basesalary(_salary()) == (40000.0, 50000.0)
+
+    def test_non_gbp_rejected(self):
+        assert _parse_basesalary(_salary(currency="USD")) == (None, None)
+
+    def test_hourly_rejected(self):
+        assert _parse_basesalary(_salary(unit="HOUR", mn="15", mx="20")) == (None, None)
+
+    def test_sub_threshold_rejected(self):
+        assert _parse_basesalary(_salary(mn="500", mx="900")) == (None, None)
+
+    def test_single_value_mirrors(self):
+        assert _parse_basesalary(_salary(mn="42000", mx=None)) == (42000.0, 42000.0)
+
+    def test_missing_block(self):
+        assert _parse_basesalary({"title": "x"}) == (None, None)
+
+
 class TestParseDetail:
     def test_uk_fulltime_permanent(self):
-        d = parse_detail(_page(_UK_FULLTIME_PERM))
+        d = parse_detail(_page({**_UK_FULLTIME_PERM, "datePosted": "2026-05-26T00:00:00+00:00", **_salary()}))
         assert d == {
             "closing_date": "2026-06-07",
             "contract_type": "permanent",
             "hours": "full-time",
             "location": "Nottingham",
             "region": "England",
+            "date_posted": "2026-05-26",
+            "salary_min": 40000.0,
+            "salary_max": 50000.0,
         }
 
     def test_international_fixed_term(self):
@@ -100,5 +130,6 @@ class TestParseDetail:
 
     def test_no_jobposting_returns_all_none(self):
         d = parse_detail("<html><body>nothing here</body></html>")
-        assert d == {"closing_date": None, "contract_type": None,
-                     "hours": None, "location": None, "region": None}
+        assert d == {"closing_date": None, "contract_type": None, "hours": None,
+                     "location": None, "region": None, "date_posted": None,
+                     "salary_min": None, "salary_max": None}

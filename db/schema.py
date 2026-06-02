@@ -54,6 +54,7 @@ _MIGRATIONS = [
     ("hours",         "TEXT"),
     ("location",      "TEXT"),   # town/city from detail-page enrichment
     ("region",        "TEXT"),   # UK nation (England/Scotland/Wales/NI) or "International"
+    ("date_posted",   "TEXT"),   # YYYY-MM-DD from JSON-LD datePosted (true posting date)
     ("enriched_at",   "TEXT"),   # ISO-8601 UTC; NULL = not yet enriched
 ]
 

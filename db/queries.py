@@ -141,13 +141,16 @@ def get_jobs_since(days: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def jobs_needing_enrichment(limit: int | None = None) -> list[dict]:
-    """Return jobs not yet enriched (newest first), as {job_id, url} dicts."""
-    sql = """
-        SELECT job_id, url FROM jobs
-        WHERE enriched_at IS NULL
-        ORDER BY first_seen DESC
+def jobs_needing_enrichment(limit: int | None = None,
+                            reenrich: bool = False) -> list[dict]:
+    """Return jobs to enrich (newest first), as {job_id, url} dicts.
+
+    Default: jobs never enriched (`enriched_at IS NULL`) — the daily-scrape case.
+    reenrich=True: jobs missing `date_posted`, i.e. enriched before the pipeline
+    captured posting date / baseSalary — used by the one-off backfill `--all`.
     """
+    predicate = "date_posted IS NULL" if reenrich else "enriched_at IS NULL"
+    sql = f"SELECT job_id, url FROM jobs WHERE {predicate} ORDER BY first_seen DESC"
     if limit is not None:
         sql += " LIMIT ?"
     with get_connection() as conn:
@@ -158,8 +161,9 @@ def jobs_needing_enrichment(limit: int | None = None) -> list[dict]:
 def update_enrichment(job_id: str, data: dict[str, Any]) -> None:
     """Write enrichment fields for one job and stamp enriched_at.
 
-    Only non-None values overwrite existing data (COALESCE), so a partial parse
-    never wipes a previously populated field.
+    Enriched-only fields use COALESCE(new, existing) so a partial parse never
+    wipes a populated field. Salary uses COALESCE(existing, new) — JSON-LD only
+    *fills gaps* and never overwrites a value already parsed from the RSS feed.
     """
     with get_connection() as conn:
         conn.execute(
@@ -170,10 +174,14 @@ def update_enrichment(job_id: str, data: dict[str, Any]) -> None:
                 hours         = COALESCE(?, hours),
                 location      = COALESCE(?, location),
                 region        = COALESCE(?, region),
+                date_posted   = COALESCE(?, date_posted),
+                salary_min    = COALESCE(salary_min, ?),
+                salary_max    = COALESCE(salary_max, ?),
                 enriched_at   = ?
             WHERE job_id = ?
             """,
             (data.get("closing_date"), data.get("contract_type"), data.get("hours"),
-             data.get("location"), data.get("region"), _now(), job_id),
+             data.get("location"), data.get("region"), data.get("date_posted"),
+             data.get("salary_min"), data.get("salary_max"), _now(), job_id),
         )
         conn.commit()

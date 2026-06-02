@@ -297,7 +297,7 @@ def recruitment_window_trends(weeks: int = 24) -> list[dict]:
             f"""
             SELECT
                 strftime('%Y-W%W', {_CLEAN_TS}) AS week,
-                ROUND(AVG(julianday(closing_date) - julianday(date({_CLEAN_TS}))), 1) AS avg_window_days,
+                ROUND(AVG(julianday(closing_date) - julianday(COALESCE(date_posted, date({_CLEAN_TS})))), 1) AS avg_window_days,
                 COUNT(*) AS job_count
             FROM jobs
             WHERE closing_date IS NOT NULL

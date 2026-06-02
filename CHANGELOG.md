@@ -22,6 +22,11 @@ All notable changes to this project are recorded here. Format loosely follows
   `docs/data-dictionary.md`, and this changelog.
 
 ### Changed
+- Enrichment now also captures `date_posted` (JSON-LD `datePosted`) and fills
+  salary gaps from JSON-LD `baseSalary` (GBP, annual, ≥£10k; gap-fill only, never
+  overwriting an RSS-parsed value). Recruitment-window chart now measures the true
+  advertised window (`closing_date − date_posted`) instead of `closing − first_seen`.
+  Backfill old rows with `python -m scripts.enrich_backfill --all`.
 - Region parsing: UK jobs with no nation in the markup are now labelled
   "UK (unspecified)" instead of leaking a bare "United Kingdom" country string.
 - Un-paused the four charts that depend on enrichment data (contract type,

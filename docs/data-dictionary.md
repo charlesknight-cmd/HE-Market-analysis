@@ -15,13 +15,14 @@ One row per unique listing, keyed by `job_id`.
 | `institution` | TEXT | RSS desc (line 1, before ` - `) | 100% | Employer name. May be an overseas institution. |
 | `department` | TEXT | RSS desc (line 1, after ` - `) | ~75% | Faculty/department; absent when the listing has no ` - ` segment. |
 | `salary_raw` | TEXT | RSS desc (`Salary:` line) | ~83% | Verbatim salary string, e.g. `£41,519 to £46,618 per annum`. "Not specified" ⇒ NULL after parsing. |
-| `salary_min` | REAL | parsed | ~83% | Lower £ bound. Hourly rates and values < £10,000 are excluded (see `parse_salary`). |
-| `salary_max` | REAL | parsed | ~83% | Upper £ bound; equals `salary_min` for single-value salaries. |
+| `salary_min` | REAL | RSS parse, gap-filled from JSON-LD `baseSalary` | ~85% | Lower £ bound. Hourly/sub-£10k excluded. Enrichment fills gaps (GBP annual only) but never overwrites an RSS value. |
+| `salary_max` | REAL | RSS parse, gap-filled from JSON-LD `baseSalary` | ~85% | Upper £ bound; equals `salary_min` for single-value salaries. |
 | `closing_date` | TEXT (YYYY-MM-DD) | detail-page JSON-LD (`validThrough`) | enriched | Populated by enrichment, not RSS. NULL until a job is enriched. |
 | `contract_type` | TEXT | detail-page JSON-LD (`employmentType`) | enriched | `permanent` / `fixed-term`. |
 | `hours` | TEXT | detail-page JSON-LD (`employmentType`) | enriched | `full-time` / `part-time` / `flexible`. |
 | `location` | TEXT | detail-page JSON-LD (`addressLocality`) | enriched | Town/city, e.g. London, Cambridge. |
-| `region` | TEXT | detail-page JSON-LD (`addressRegion`/country) | enriched | UK nation (England/Scotland/Wales/Northern Ireland) or `International`. |
+| `region` | TEXT | detail-page JSON-LD (`addressRegion`/country) | enriched | UK nation (England/Scotland/Wales/Northern Ireland), `International`, or `UK (unspecified)`. |
+| `date_posted` | TEXT (YYYY-MM-DD) | detail-page JSON-LD (`datePosted`) | enriched | True advertised posting date. Used for the recruitment-window calc (`closing_date − date_posted`). |
 | `enriched_at` | TEXT (ISO-8601 UTC) | enrichment | enriched | When the job was enriched. NULL ⇒ not yet processed (will be picked up next run). |
 | `category` | TEXT | feed slug | 100% | Which RSS feed it came from (see `config.RSS_FEEDS`). |
 | `url` | TEXT | RSS link | 100% | Canonical listing URL; also the detail page fetched for enrichment. |
