@@ -250,6 +250,13 @@ with t_overview:
     k5.metric("Categories", summary["categories"])
 
     st.divider()
+    col_l, col_r = st.columns(2)
+    with col_l:
+        st.plotly_chart(daily_jobs_line(_daily(lookback_days)), width='stretch', key="daily_jobs")
+    with col_r:
+        st.plotly_chart(category_weekly_bar(_cat_weekly(weeks)), width='stretch', key="cat_weekly")
+
+    st.divider()
 
     alerts = _alerts()
     if alerts:
@@ -259,21 +266,22 @@ with t_overview:
             "warning":  {"label": "Elevated Activity", "icon": "📈"},
             "info":     {"label": "Market Trend",      "icon": "💡"}
         }
-        for a in alerts:
+
+        def _render_insight(a):
             m = meta.get(a.severity, {"label": "Insight", "icon": "•"})
             msg = a.message
             for slug, label in CATEGORY_LABELS.items():
                 msg = msg.replace(slug, label)
             st.info(f"{m['icon']} **{m['label']}** — {msg}")
+
+        for a in alerts[:3]:
+            _render_insight(a)
+        if len(alerts) > 3:
+            with st.expander(f"Show {len(alerts) - 3} more insight(s)"):
+                for a in alerts[3:]:
+                    _render_insight(a)
     else:
         st.success("✅ No unusual activity or trends detected in this window.")
-
-    st.divider()
-    col_l, col_r = st.columns(2)
-    with col_l:
-        st.plotly_chart(daily_jobs_line(_daily(lookback_days)), width='stretch', key="daily_jobs")
-    with col_r:
-        st.plotly_chart(category_weekly_bar(_cat_weekly(weeks)), width='stretch', key="cat_weekly")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TRENDS
