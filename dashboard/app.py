@@ -53,6 +53,10 @@ from analysis.trends import (
     seniority_breakdown,
     jobs_by_region,
     top_locations,
+    application_window_distribution,
+    upcoming_deadlines,
+    salary_by_region,
+    salary_by_contract_type,
 )
 from config import CATEGORY_LABELS
 from dashboard.charts import (
@@ -81,6 +85,10 @@ from dashboard.charts import (
     seniority_breakdown_bar,
     region_bar,
     top_locations_bar,
+    application_window_hist,
+    upcoming_deadlines_bar,
+    salary_by_region_bar,
+    salary_by_contract_bar,
 )
 from db.queries import get_all_jobs, last_scrape_time
 
@@ -252,6 +260,18 @@ def _region(d):             return jobs_by_region(days=d)
 @st.cache_data(ttl=300)
 def _top_locations(d):      return top_locations(days=d, limit=15)
 
+@st.cache_data(ttl=300)
+def _app_window(d):         return application_window_distribution(days=d)
+
+@st.cache_data(ttl=300)
+def _deadlines():           return upcoming_deadlines(weeks_ahead=8)
+
+@st.cache_data(ttl=300)
+def _salary_region(d):      return salary_by_region(days=max(d, 90))
+
+@st.cache_data(ttl=300)
+def _salary_contract(d):    return salary_by_contract_type(days=max(d, 90))
+
 weeks = max(1, lookback_days // 7)
 months = max(1, lookback_days // 30)
 
@@ -348,7 +368,15 @@ with t_trends:
         st.plotly_chart(hours_bar(_hours_trend(weeks)), width='stretch', key="hours")
 
     st.divider()
-    st.plotly_chart(recruitment_window_line(_recruitment_window(weeks)), width='stretch', key="recruitment_window")
+    col_rw, col_aw = st.columns(2)
+    with col_rw:
+        st.plotly_chart(recruitment_window_line(_recruitment_window(weeks)), width='stretch', key="recruitment_window")
+    with col_aw:
+        st.plotly_chart(application_window_hist(_app_window(lookback_days)), width='stretch', key="app_window")
+
+    st.divider()
+    st.plotly_chart(upcoming_deadlines_bar(_deadlines()), width='stretch', key="deadlines")
+    st.caption("Currently-open jobs grouped by the week their application deadline falls — the recruiting pipeline ahead.")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROLES
@@ -413,6 +441,10 @@ with t_roles:
             )
 
     st.divider()
+    st.plotly_chart(salary_by_contract_bar(_salary_contract(lookback_days)), width='stretch', key="salary_contract")
+    st.caption("Median advertised salary floor for permanent vs fixed-term roles (contract type from enrichment).")
+
+    st.divider()
     st.subheader("Keyword Salary Premium Analysis")
     st.caption("How much salary premium specific keywords in job titles command compared to their category baseline average.")
     st.plotly_chart(keyword_premium_bar(_keyword_premiums(lookback_days)), width='stretch', key="keyword_premiums")
@@ -451,7 +483,8 @@ with t_institutions:
         st.plotly_chart(region_bar(_region(lookback_days)), width='stretch', key="region")
     with col_geo_r:
         st.plotly_chart(top_locations_bar(_top_locations(lookback_days)), width='stretch', key="top_locations")
-    st.caption("Location is parsed from each job's detail page; it fills in as enrichment runs.")
+    st.plotly_chart(salary_by_region_bar(_salary_region(lookback_days)), width='stretch', key="salary_region")
+    st.caption("Location and salary are parsed from each job's detail page; they fill in as enrichment runs.")
 
     st.divider()
 
@@ -539,10 +572,12 @@ with t_data:
         df_filtered = df_all[mask].copy()
         st.caption(f"Showing {len(df_filtered):,} of {len(df_all):,} jobs")
 
-        show_cols = ["title", "institution", "category", "salary_raw", "first_seen", "url"]
+        show_cols = ["title", "institution", "category", "region", "salary_raw",
+                     "date_posted", "closing_date", "first_seen", "url"]
         df_display = df_filtered[show_cols].rename(columns={
             "title": "Title", "institution": "Institution", "category": "Category",
-            "salary_raw": "Salary", "first_seen": "First seen", "url": "URL",
+            "region": "Region", "salary_raw": "Salary", "date_posted": "Posted",
+            "closing_date": "Closes", "first_seen": "First seen", "url": "URL",
         })
         df_display["Category"] = df_display["Category"].map(lambda s: CATEGORY_LABELS.get(s, s))
 

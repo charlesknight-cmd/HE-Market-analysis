@@ -77,7 +77,11 @@ Built in `dashboard/charts.py`, laid out across tabs in `dashboard/app.py`.
 | Trends | Permanent vs fixed-term per week | `contract_type_bar` | contract_type (enriched) |
 | Trends | Permanent contract share % | `permanent_ratio_line` | contract_type (enriched) |
 | Trends | Full- vs part-time per week | `hours_bar` | hours (enriched) |
-| Trends | Application window length | `recruitment_window_line` | closing_date (enriched), first_seen |
+| Trends | Application window length (over time) | `recruitment_window_line` | closing_date, date_posted (enriched) |
+| Trends | Time on market (window distribution) | `application_window_hist` | closing_date, date_posted (enriched) |
+| Trends | Upcoming deadlines by week | `upcoming_deadlines_bar` | closing_date (enriched) |
+| Roles | Median salary: permanent vs fixed-term | `salary_by_contract_bar` | contract_type (enriched), salary_min |
+| Institutions | Median salary by region | `salary_by_region_bar` | region (enriched), salary_min |
 | Institutions | Jobs by UK nation / International | `region_bar` | region (enriched) |
 | Institutions | Top hiring locations | `top_locations_bar` | location (enriched) |
 | Roles | Postings by seniority band | `seniority_breakdown_bar` | title, salary_min |

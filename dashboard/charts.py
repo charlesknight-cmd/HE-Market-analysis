@@ -721,3 +721,85 @@ def seniority_breakdown_bar(rows: list[dict]) -> go.Figure:
         margin=dict(l=190),
     )
     return _style_fig(fig)
+
+
+def application_window_hist(rows: list[dict]) -> go.Figure:
+    """Histogram: how long jobs stay open (closing date − posting date)."""
+    if not rows:
+        return _empty("No posting/closing dates yet — runs after enrichment")
+    df = pd.DataFrame(rows)
+    median = df["window_days"].median()
+    fig = go.Figure(go.Histogram(
+        x=df["window_days"],
+        marker_color=_ACCENT,
+        xbins=dict(size=7),
+        hovertemplate="%{x} days open<br>%{y} jobs<extra></extra>",
+    ))
+    fig.add_vline(
+        x=median, line_dash="dash", line_color=_NEG,
+        annotation_text=f"median {median:.0f}d", annotation_position="top",
+    )
+    fig.update_layout(
+        title="Time on market — application window length",
+        xaxis_title="Days open (posting → closing)", yaxis_title="Number of jobs",
+        bargap=0.05,
+    )
+    return _style_fig(fig)
+
+
+def upcoming_deadlines_bar(rows: list[dict]) -> go.Figure:
+    """Bar: number of open jobs closing in each upcoming week."""
+    if not rows:
+        return _empty("No upcoming closing dates")
+    df = pd.DataFrame(rows)
+    fig = go.Figure(go.Bar(
+        x=df["week"], y=df["job_count"],
+        marker_color=_ACCENT,
+        text=df["job_count"], textposition="outside",
+        hovertemplate="Week %{x}<br>%{y} jobs closing<extra></extra>",
+    ))
+    fig.update_layout(
+        title="Upcoming application deadlines (open jobs by closing week)",
+        xaxis_title="ISO week", yaxis_title="Jobs closing",
+    )
+    return _style_fig(fig)
+
+
+def _median_salary_bar(rows: list[dict], title: str, highlight_intl: bool = False) -> go.Figure:
+    """Shared horizontal bar of median salary floor per group."""
+    if not rows:
+        return _empty("Not enough salaried jobs yet")
+    df = pd.DataFrame(rows).sort_values("median_salary")
+    if highlight_intl:
+        df["colour"] = df["group"].apply(lambda g: _NEG if g == "International" else _ACCENT)
+    else:
+        df["colour"] = _ACCENT
+    fig = go.Figure(go.Bar(
+        x=df["median_salary"], y=df["group"],
+        orientation="h",
+        marker_color=df["colour"],
+        text=df["median_salary"].apply(lambda x: f"£{x:,.0f}"),
+        textposition="outside",
+        customdata=df["n"],
+        hovertemplate="%{y}<br>Median floor: £%{x:,.0f}<br>(%{customdata} salaried jobs)<extra></extra>",
+    ))
+    fig.update_layout(
+        title=title,
+        xaxis=dict(title="Median salary floor (£)", tickprefix="£", tickformat=","),
+        yaxis_title="",
+        margin=dict(l=140),
+    )
+    return _style_fig(fig)
+
+
+def salary_by_region_bar(rows: list[dict]) -> go.Figure:
+    """Horizontal bar: median salary floor per region."""
+    return _median_salary_bar(rows, "Median salary floor by region", highlight_intl=True)
+
+
+def salary_by_contract_bar(rows: list[dict]) -> go.Figure:
+    """Horizontal bar: median salary floor by contract type."""
+    df_title = "Median salary floor: permanent vs fixed-term"
+    if rows:
+        rows = [{**r, "group": r["group"].replace("-", " ").title()} for r in rows]
+    return _median_salary_bar(rows, df_title)

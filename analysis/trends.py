@@ -568,3 +568,76 @@ def seniority_breakdown(days: int = 365) -> list[dict]:
             "n_with_salary": len(sals),
         })
     return sorted(result, key=lambda x: x["count"], reverse=True)
+
+
+def application_window_distribution(days: int = 180) -> list[dict]:
+    """Per-job application-window lengths (closing_date − date_posted) in days.
+
+    Uses the true posting date where enrichment captured it, falling back to
+    first_seen. Returns [{window_days}], filtered to a sane 0–365 day range.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT julianday(closing_date)
+                   - julianday(COALESCE(date_posted, date({_CLEAN_TS}))) AS window_days
+            FROM jobs
+            WHERE closing_date IS NOT NULL
+              AND {_CLEAN_TS} >= datetime('now', :offset)
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+    return [{"window_days": round(r["window_days"])}
+            for r in rows if r["window_days"] is not None and 0 <= r["window_days"] <= 365]
+
+
+def upcoming_deadlines(weeks_ahead: int = 8) -> list[dict]:
+    """Count of currently-open jobs closing in each of the next `weeks_ahead` weeks."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT strftime('%Y-W%W', closing_date) AS week,
+                   COUNT(*)                          AS job_count
+            FROM jobs
+            WHERE closing_date IS NOT NULL
+              AND closing_date >= date('now')
+              AND closing_date <= date('now', :ahead)
+            GROUP BY week
+            ORDER BY week
+            """,
+            {"ahead": f"+{weeks_ahead * 7} days"},
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _median_salary_by(column: str, days: int, min_jobs: int) -> list[dict]:
+    """Median salary floor grouped by an enriched categorical column."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT {column} AS grp, salary_min
+            FROM jobs
+            WHERE {column} IS NOT NULL
+              AND salary_min IS NOT NULL
+              AND {_CLEAN_TS} >= datetime('now', :offset)
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+    buckets: dict[str, list] = defaultdict(list)
+    for r in rows:
+        buckets[r["grp"]].append(r["salary_min"])
+    result = [
+        {"group": grp, "median_salary": round(_percentile(sals, 0.5), 0), "n": len(sals)}
+        for grp, sals in buckets.items() if len(sals) >= min_jobs
+    ]
+    return sorted(result, key=lambda x: x["median_salary"], reverse=True)
+
+
+def salary_by_region(days: int = 180, min_jobs: int = 3) -> list[dict]:
+    """Median salary floor per region (UK nation / International)."""
+    return _median_salary_by("region", days, min_jobs)
+
+
+def salary_by_contract_type(days: int = 180, min_jobs: int = 3) -> list[dict]:
+    """Median salary floor for permanent vs fixed-term roles."""
+    return _median_salary_by("contract_type", days, min_jobs)

@@ -18,6 +18,11 @@ All notable changes to this project are recorded here. Format loosely follows
 - Geographic charts on the Institutions tab: jobs by UK nation / International
   (`region_bar`) and top hiring locations (`top_locations_bar`), backed by new
   `jobs_by_region` / `top_locations` queries.
+- Charts exploiting the enriched data: time-on-market histogram
+  (`application_window_hist`), upcoming-deadlines bar (`upcoming_deadlines_bar`),
+  median salary by region (`salary_by_region_bar`), and median salary by contract
+  type (`salary_by_contract_bar`). `date_posted`, `closing_date`, and region added
+  to the Data tab table.
 - Project documentation: full `README.md`, `docs/architecture.md`,
   `docs/data-dictionary.md`, and this changelog.
 
