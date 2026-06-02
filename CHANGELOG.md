@@ -6,6 +6,15 @@ All notable changes to this project are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- **Detail-page enrichment pipeline.** `scraper/detail.py` fetches each job's
+  detail page and parses the schema.org `JobPosting` JSON-LD block to recover
+  closing date, contract type, hours, and location/region (UK nation or
+  "International") — fields the RSS feed omits. New `location`, `region`, and
+  `enriched_at` columns; `jobs_needing_enrichment` / `update_enrichment` queries;
+  rate-limited `run_enrichment` (sequential, delayed, skips already-enriched).
+  Wired into `scraper.run` (capped at 200/run, `--no-enrich` to skip) and a
+  `scripts/enrich_backfill` script for the historical backlog. Tests in
+  `tests/test_detail.py`.
 - Project documentation: full `README.md`, `docs/architecture.md`,
   `docs/data-dictionary.md`, and this changelog.
 - Git pre-commit hook (`.githooks/pre-commit`, enabled via `core.hooksPath`)

@@ -139,3 +139,41 @@ def get_jobs_since(days: int) -> list[dict]:
             (f"-{days} days",),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def jobs_needing_enrichment(limit: int | None = None) -> list[dict]:
+    """Return jobs not yet enriched (newest first), as {job_id, url} dicts."""
+    sql = """
+        SELECT job_id, url FROM jobs
+        WHERE enriched_at IS NULL
+        ORDER BY first_seen DESC
+    """
+    if limit is not None:
+        sql += " LIMIT ?"
+    with get_connection() as conn:
+        rows = conn.execute(sql, (limit,) if limit is not None else ()).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_enrichment(job_id: str, data: dict[str, Any]) -> None:
+    """Write enrichment fields for one job and stamp enriched_at.
+
+    Only non-None values overwrite existing data (COALESCE), so a partial parse
+    never wipes a previously populated field.
+    """
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE jobs SET
+                closing_date  = COALESCE(?, closing_date),
+                contract_type = COALESCE(?, contract_type),
+                hours         = COALESCE(?, hours),
+                location      = COALESCE(?, location),
+                region        = COALESCE(?, region),
+                enriched_at   = ?
+            WHERE job_id = ?
+            """,
+            (data.get("closing_date"), data.get("contract_type"), data.get("hours"),
+             data.get("location"), data.get("region"), _now(), job_id),
+        )
+        conn.commit()

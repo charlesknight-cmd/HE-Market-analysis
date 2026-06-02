@@ -16,9 +16,13 @@ from config import SCHEDULE_TIME
 from db.queries import bulk_upsert, log_run
 from db.schema import init_db
 from scraper.fetcher import fetch_all
+from scraper.detail import run_enrichment
+
+# Cap detail-page fetches per scrape so a backlog can't hammer the site in one run.
+ENRICH_LIMIT = 200
 
 
-def run_once() -> None:
+def run_once(enrich: bool = True) -> None:
     started = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     print(f"\n[{started}] Starting scrape...")
 
@@ -46,6 +50,9 @@ def run_once() -> None:
         f"\nDone — {total_found} total, {total_new} new, {total_updated} updated.\n"
     )
 
+    if enrich:
+        run_enrichment(limit=ENRICH_LIMIT)
+
 
 def run_daemon() -> None:
     print(f"Daemon mode: running now, then daily at {SCHEDULE_TIME}.")
@@ -64,6 +71,11 @@ def main() -> None:
         action="store_true",
         help=f"Keep running and re-scrape daily at {SCHEDULE_TIME}",
     )
+    parser.add_argument(
+        "--no-enrich",
+        action="store_true",
+        help="Skip the detail-page enrichment step (RSS upsert only)",
+    )
     args = parser.parse_args()
 
     init_db()
@@ -71,7 +83,7 @@ def main() -> None:
     if args.daemon:
         run_daemon()
     else:
-        run_once()
+        run_once(enrich=not args.no_enrich)
 
 
 if __name__ == "__main__":

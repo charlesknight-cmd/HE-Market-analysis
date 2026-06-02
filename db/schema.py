@@ -43,6 +43,8 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_jobs_last_seen     ON jobs (last_seen)",
     "CREATE INDEX IF NOT EXISTS idx_jobs_contract_type ON jobs (contract_type)",
     "CREATE INDEX IF NOT EXISTS idx_jobs_hours         ON jobs (hours)",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_region        ON jobs (region)",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_enriched_at   ON jobs (enriched_at)",
 ]
 
 # Columns added after initial release — ALTER TABLE is safe to run repeatedly
@@ -50,6 +52,9 @@ _MIGRATIONS = [
     ("closing_date",  "TEXT"),
     ("contract_type", "TEXT"),
     ("hours",         "TEXT"),
+    ("location",      "TEXT"),   # town/city from detail-page enrichment
+    ("region",        "TEXT"),   # UK nation (England/Scotland/Wales/NI) or "International"
+    ("enriched_at",   "TEXT"),   # ISO-8601 UTC; NULL = not yet enriched
 ]
 
 
