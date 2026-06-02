@@ -271,9 +271,9 @@ with t_overview:
     st.divider()
     col_l, col_r = st.columns(2)
     with col_l:
-        st.plotly_chart(daily_jobs_line(_daily(lookback_days)), use_container_width=True, key="daily_jobs")
+        st.plotly_chart(daily_jobs_line(_daily(lookback_days)), width='stretch', key="daily_jobs")
     with col_r:
-        st.plotly_chart(category_weekly_bar(_cat_weekly(weeks)), use_container_width=True, key="cat_weekly")
+        st.plotly_chart(category_weekly_bar(_cat_weekly(weeks)), width='stretch', key="cat_weekly")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TRENDS
@@ -282,35 +282,35 @@ with t_overview:
 with t_trends:
     st.info("Charts fill in as the database accumulates weeks of history.")
 
-    st.plotly_chart(category_share_area(_cat_share(weeks)), use_container_width=True, key="cat_share")
+    st.plotly_chart(category_share_area(_cat_share(weeks)), width='stretch', key="cat_share")
     
     st.divider()
     col_new_l, col_new_r = st.columns(2)
     with col_new_l:
-        st.plotly_chart(salary_percentile_bands(_salary_percentiles(weeks)), use_container_width=True, key="salary_percentile_bands")
+        st.plotly_chart(salary_percentile_bands(_salary_percentiles(weeks)), width='stretch', key="salary_percentile_bands")
     with col_new_r:
-        st.plotly_chart(seasonal_heatmap(_seasonal_heatmap()), use_container_width=True, key="seasonal_heatmap")
+        st.plotly_chart(seasonal_heatmap(_seasonal_heatmap()), width='stretch', key="seasonal_heatmap")
 
     st.divider()
 
     col_l, col_r = st.columns(2)
     with col_l:
-        st.plotly_chart(seasonal_bar(_monthly(max(months, 3))), use_container_width=True, key="seasonal")
+        st.plotly_chart(seasonal_bar(_monthly(max(months, 3))), width='stretch', key="seasonal")
     with col_r:
-        st.plotly_chart(salary_inflation_line(_salary_month(max(months, 3))), use_container_width=True, key="salary_inflation")
+        st.plotly_chart(salary_inflation_line(_salary_month(max(months, 3))), width='stretch', key="salary_inflation")
 
     st.divider()
 
     col_l2, col_r2, col_c2 = st.columns(3)
     with col_l2:
-        st.plotly_chart(contract_type_bar(_contract_trend(weeks)), use_container_width=True, key="contract_type")
+        st.plotly_chart(contract_type_bar(_contract_trend(weeks)), width='stretch', key="contract_type")
     with col_r2:
-        st.plotly_chart(permanent_ratio_line(_contract_trend(weeks)), use_container_width=True, key="permanent_ratio")
+        st.plotly_chart(permanent_ratio_line(_contract_trend(weeks)), width='stretch', key="permanent_ratio")
     with col_c2:
-        st.plotly_chart(hours_bar(_hours_trend(weeks)), use_container_width=True, key="hours")
+        st.plotly_chart(hours_bar(_hours_trend(weeks)), width='stretch', key="hours")
 
     st.divider()
-    st.plotly_chart(recruitment_window_line(_recruitment_window(weeks)), use_container_width=True, key="recruitment_window")
+    st.plotly_chart(recruitment_window_line(_recruitment_window(weeks)), width='stretch', key="recruitment_window")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROLES
@@ -322,12 +322,12 @@ with t_roles:
     with col_l:
         st.plotly_chart(
             title_frequency_bar(_title_freq(lookback_days)),
-            use_container_width=True,
+            width='stretch',
             key="title_freq",
         )
 
     with col_r:
-        st.plotly_chart(category_growth_bar(_cat_growth()), use_container_width=True, key="cat_growth")
+        st.plotly_chart(category_growth_bar(_cat_growth()), width='stretch', key="cat_growth")
 
         growth = _cat_growth()
         if growth:
@@ -337,13 +337,13 @@ with t_roles:
                 "category": "Category", "last_week": "Last week",
                 "this_week": "This week", "change_pct": "Change %",
             })
-            st.dataframe(df_g, hide_index=True, use_container_width=True)
+            st.dataframe(df_g, hide_index=True, width='stretch')
 
     st.divider()
 
     col_l2, col_r2 = st.columns(2)
     with col_l2:
-        st.plotly_chart(salary_box_by_category(_salary_trends(weeks)), use_container_width=True, key="salary_box")
+        st.plotly_chart(salary_box_by_category(_salary_trends(weeks)), width='stretch', key="salary_box")
     with col_r2:
         sal = _salary_trends(weeks)
         if sal:
@@ -362,13 +362,13 @@ with t_roles:
             })
             st.dataframe(
                 df_s[["Category", "Avg floor", "Avg ceiling", "Jobs with salary"]],
-                hide_index=True, use_container_width=True,
+                hide_index=True, width='stretch',
             )
 
     st.divider()
     st.subheader("Keyword Salary Premium Analysis")
     st.caption("How much salary premium specific keywords in job titles command compared to their category baseline average.")
-    st.plotly_chart(keyword_premium_bar(_keyword_premiums(lookback_days)), use_container_width=True, key="keyword_premiums")
+    st.plotly_chart(keyword_premium_bar(_keyword_premiums(lookback_days)), width='stretch', key="keyword_premiums")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INSTITUTIONS
@@ -380,7 +380,7 @@ with t_institutions:
     with col_l:
         st.plotly_chart(
             top_institutions_bar(_top_inst(lookback_days), lookback_days),
-            use_container_width=True,
+            width='stretch',
             key="top_inst",
         )
 
@@ -393,7 +393,7 @@ with t_institutions:
                 lambda s: ", ".join(CATEGORY_LABELS.get(c.strip(), c.strip()) for c in s.split(","))
             )
             df_sp.columns = ["Institution", "Jobs", "Categories"]
-            st.dataframe(df_sp, hide_index=True, use_container_width=True)
+            st.dataframe(df_sp, hide_index=True, width='stretch')
         else:
             st.info("No spikes detected in this window.")
 
@@ -403,19 +403,19 @@ with t_institutions:
     with col_l2:
         st.plotly_chart(
             institution_salary_scatter(_salary_inst(lookback_days)),
-            use_container_width=True,
+            width='stretch',
             key="inst_salary",
         )
     with col_r2:
-        st.plotly_chart(market_concentration_line(_market_concentration(weeks)), use_container_width=True, key="market_hhi")
+        st.plotly_chart(market_concentration_line(_market_concentration(weeks)), width='stretch', key="market_hhi")
 
     st.divider()
 
     col_l3, col_r3 = st.columns(2)
     with col_l3:
-        st.plotly_chart(new_vs_repeat_bar(_new_vs_repeat(weeks)), use_container_width=True, key="new_vs_repeat")
+        st.plotly_chart(new_vs_repeat_bar(_new_vs_repeat(weeks)), width='stretch', key="new_vs_repeat")
     with col_r3:
-        st.plotly_chart(longevity_histogram(_longevity()), use_container_width=True, key="longevity")
+        st.plotly_chart(longevity_histogram(_longevity()), width='stretch', key="longevity")
         st.caption(
             "Days visible = gap between first and last time a job appeared in "
             "the RSS feed. Zero means seen in one scrape only. This is a proxy "
@@ -440,7 +440,7 @@ with t_institutions:
                     labels={"week": "ISO week", "job_count": "Jobs"},
                     title=f"{selected} — weekly postings",
                 )
-                st.plotly_chart(fig, use_container_width=True, key="inst_drill")
+                st.plotly_chart(fig, width='stretch', key="inst_drill")
         with col_drill_r:
             breakdown = institution_category_breakdown(days=lookback_days)
             inst_rows = [r for r in breakdown if r["institution"] == selected]
@@ -448,7 +448,7 @@ with t_institutions:
                 df_b = pd.DataFrame(inst_rows)[["category", "job_count"]]
                 df_b["category"] = df_b["category"].map(lambda s: CATEGORY_LABELS.get(s, s))
                 df_b.columns = ["Category", "Jobs"]
-                st.dataframe(df_b, hide_index=True, use_container_width=True)
+                st.dataframe(df_b, hide_index=True, width='stretch')
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DATA
@@ -491,7 +491,7 @@ with t_data:
         df_display["Category"] = df_display["Category"].map(lambda s: CATEGORY_LABELS.get(s, s))
 
         st.dataframe(
-            df_display, hide_index=True, use_container_width=True,
+            df_display, hide_index=True, width='stretch',
             column_config={"URL": st.column_config.LinkColumn("URL", display_text="Open")},
         )
 
