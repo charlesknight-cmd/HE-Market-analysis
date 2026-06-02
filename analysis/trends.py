@@ -434,3 +434,102 @@ def keyword_salary_premiums(days: int = 90, min_occurrences: int = 2) -> list[di
             })
 
     return sorted(premiums, key=lambda x: x["premium_pct"], reverse=True)
+
+
+def salary_transparency_trend(weeks: int = 12) -> list[dict]:
+    """Weekly share of postings that do NOT disclose a parseable salary."""
+    days = weeks * 7
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                strftime('%Y-W%W', {_CLEAN_TS}) AS week,
+                COUNT(*) AS total,
+                SUM(CASE WHEN salary_min IS NULL THEN 1 ELSE 0 END) AS undisclosed
+            FROM jobs
+            WHERE {_CLEAN_TS} >= datetime('now', :offset)
+            GROUP BY week
+            ORDER BY week
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+    result = []
+    for r in rows:
+        total = r["total"] or 0
+        und = r["undisclosed"] or 0
+        result.append({
+            "week": r["week"],
+            "total": total,
+            "undisclosed": und,
+            "undisclosed_pct": round(und / total * 100, 1) if total else 0,
+        })
+    return result
+
+
+def salary_distribution(days: int = 90) -> list[dict]:
+    """Raw salary floors (with category) for distribution / histogram analysis."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT salary_min, category
+            FROM jobs
+            WHERE salary_min IS NOT NULL
+              AND {_CLEAN_TS} >= datetime('now', :offset)
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# Seniority bands, ordered most-specific first so first-match classification is correct
+# (e.g. "associate professor" must be tested before the bare "professor" rule).
+_SENIORITY_RULES = [
+    ("Associate Prof / Reader",   r"associate professor|\breader\b"),
+    ("Senior Lecturer",           r"senior lecturer|principal lecturer"),
+    ("Lecturer / Assistant Prof", r"\blecturer\b|assistant professor"),
+    ("Professor",                 r"\bprofessor\b|\bchair\b|\bprof\b"),
+    ("Research Fellow / Postdoc", r"research fellow|post-?doctoral|\bpostdoc\b|research associate|research assistant"),
+    ("PhD / Studentship",         r"\bphd\b|doctoral|studentship|graduate teaching"),
+    ("Director / Head / Dean",    r"\bdirector\b|head of|\bdean\b|\bpro vice\b|\bvice-chancellor\b"),
+    ("Manager / Officer",         r"\bmanager\b|\bofficer\b|\bco-?ordinator\b|\badministrator\b"),
+    ("Technician / Analyst",      r"\btechnician\b|\banalyst\b|\bengineer\b|\bdeveloper\b"),
+]
+
+
+def _classify_seniority(title: str) -> str:
+    t = (title or "").lower()
+    for rank, pattern in _SENIORITY_RULES:
+        if re.search(pattern, t):
+            return rank
+    return "Other / Unclassified"
+
+
+def seniority_breakdown(days: int = 365) -> list[dict]:
+    """Classify job titles into seniority bands; return count + median floor per band."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT title, salary_min
+            FROM jobs
+            WHERE {_CLEAN_TS} >= datetime('now', :offset)
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+
+    bands: dict[str, dict] = defaultdict(lambda: {"count": 0, "salaries": []})
+    for r in rows:
+        band = bands[_classify_seniority(r["title"])]
+        band["count"] += 1
+        if r["salary_min"] is not None:
+            band["salaries"].append(r["salary_min"])
+
+    result = []
+    for rank, data in bands.items():
+        sals = data["salaries"]
+        result.append({
+            "rank": rank,
+            "count": data["count"],
+            "median_salary": round(_percentile(sals, 0.5), 0) if sals else None,
+            "n_with_salary": len(sals),
+        })
+    return sorted(result, key=lambda x: x["count"], reverse=True)

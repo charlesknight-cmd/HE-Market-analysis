@@ -604,3 +604,74 @@ def permanent_ratio_line(rows: list[dict]) -> go.Figure:
         hovermode="x unified",
     )
     return _style_fig(fig)
+
+
+# ── RSS-native charts (added 2026-06) ──────────────────────────────────────────
+
+def salary_transparency_line(rows: list[dict]) -> go.Figure:
+    """Line: weekly share of postings that don't disclose a parseable salary."""
+    if not rows:
+        return _empty()
+    df = pd.DataFrame(rows).sort_values("week")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df["week"], y=df["undisclosed_pct"],
+        mode="lines+markers", name="% undisclosed",
+        line=dict(color="#F77F00", width=2.5, shape="spline"),
+        fill="tozeroy", fillcolor="rgba(247, 127, 0, 0.10)",
+        customdata=df[["undisclosed", "total"]].values,
+        hovertemplate=("Week %{x}<br>Undisclosed: %{y}% "
+                       "(%{customdata[0]} of %{customdata[1]})<extra></extra>"),
+    ))
+    fig.update_layout(
+        title="Salary transparency: share of postings hiding pay",
+        xaxis_title="ISO week", yaxis_title="Salary not disclosed (%)",
+        yaxis=dict(range=[0, 100]),
+        hovermode="x unified",
+    )
+    return _style_fig(fig)
+
+
+def salary_distribution_hist(rows: list[dict]) -> go.Figure:
+    """Histogram: distribution of advertised salary floors."""
+    if not rows:
+        return _empty()
+    df = pd.DataFrame(rows)
+    fig = go.Figure(go.Histogram(
+        x=df["salary_min"],
+        marker_color=_ACCENT,
+        xbins=dict(size=5000),
+        hovertemplate="£%{x}<br>%{y} jobs<extra></extra>",
+    ))
+    fig.update_layout(
+        title="Salary floor distribution",
+        xaxis=dict(title="Advertised salary floor (£)", tickprefix="£", tickformat=","),
+        yaxis_title="Number of jobs",
+        bargap=0.05,
+    )
+    return _style_fig(fig)
+
+
+def seniority_breakdown_bar(rows: list[dict]) -> go.Figure:
+    """Horizontal bar: posting volume per seniority band, median floor on hover."""
+    if not rows:
+        return _empty()
+    df = pd.DataFrame(rows).sort_values("count")
+    df["median_label"] = df["median_salary"].apply(
+        lambda x: f"£{x:,.0f}" if pd.notnull(x) else "n/a"
+    )
+    fig = go.Figure(go.Bar(
+        x=df["count"], y=df["rank"],
+        orientation="h",
+        marker_color=_ACCENT,
+        text=df["count"],
+        textposition="outside",
+        customdata=df["median_label"],
+        hovertemplate="%{y}<br>%{x} postings<br>Median floor: %{customdata}<extra></extra>",
+    ))
+    fig.update_layout(
+        title="Postings by seniority band",
+        xaxis_title="Number of postings", yaxis_title="",
+        margin=dict(l=190),
+    )
+    return _style_fig(fig)
