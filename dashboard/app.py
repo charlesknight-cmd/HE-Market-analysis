@@ -339,50 +339,46 @@ with t_overview:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with t_trends:
-    st.info("Charts fill in as the database accumulates weeks of history.")
+    st.caption("Charts fill in as the database accumulates weeks of history.")
+    sub_volume, sub_pay, sub_contract, sub_timing = st.tabs(
+        ["Volume & Seasonality", "Pay", "Contracts", "Timing"]
+    )
 
-    st.plotly_chart(category_share_area(_cat_share(weeks)), width='stretch', key="cat_share")
-    
-    st.divider()
-    col_new_l, col_new_r = st.columns(2)
-    with col_new_l:
-        st.plotly_chart(salary_percentile_bands(_salary_percentiles(weeks)), width='stretch', key="salary_percentile_bands")
-    with col_new_r:
-        st.plotly_chart(seasonal_heatmap(_seasonal_heatmap()), width='stretch', key="seasonal_heatmap")
+    with sub_volume:
+        st.plotly_chart(category_share_area(_cat_share(weeks)), width='stretch', key="cat_share")
+        col_v1, col_v2 = st.columns(2)
+        with col_v1:
+            st.plotly_chart(seasonal_heatmap(_seasonal_heatmap()), width='stretch', key="seasonal_heatmap")
+        with col_v2:
+            st.plotly_chart(seasonal_bar(_monthly(max(months, 3))), width='stretch', key="seasonal")
 
-    st.divider()
+    with sub_pay:
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            st.plotly_chart(salary_percentile_bands(_salary_percentiles(weeks)), width='stretch', key="salary_percentile_bands")
+        with col_p2:
+            st.plotly_chart(salary_inflation_line(_salary_month(max(months, 3))), width='stretch', key="salary_inflation")
+        st.plotly_chart(salary_transparency_line(_salary_transparency(weeks)), width='stretch', key="salary_transparency")
+        st.caption("Share of new postings that don't state a parseable salary.")
 
-    col_l, col_r = st.columns(2)
-    with col_l:
-        st.plotly_chart(seasonal_bar(_monthly(max(months, 3))), width='stretch', key="seasonal")
-    with col_r:
-        st.plotly_chart(salary_inflation_line(_salary_month(max(months, 3))), width='stretch', key="salary_inflation")
+    with sub_contract:
+        st.caption("Contract type and hours come from detail-page enrichment — they populate as jobs are enriched.")
+        col_c1, col_c2, col_c3 = st.columns(3)
+        with col_c1:
+            st.plotly_chart(contract_type_bar(_contract_trend(weeks)), width='stretch', key="contract_type")
+        with col_c2:
+            st.plotly_chart(permanent_ratio_line(_contract_trend(weeks)), width='stretch', key="permanent_ratio")
+        with col_c3:
+            st.plotly_chart(hours_bar(_hours_trend(weeks)), width='stretch', key="hours")
 
-    st.divider()
-    st.plotly_chart(salary_transparency_line(_salary_transparency(weeks)), width='stretch', key="salary_transparency")
-    st.caption("Share of new postings that don't state a parseable salary.")
-
-    st.divider()
-    st.caption("Closing date, contract type, and hours come from detail-page enrichment — they populate as jobs are enriched.")
-
-    col_l2, col_r2, col_c2 = st.columns(3)
-    with col_l2:
-        st.plotly_chart(contract_type_bar(_contract_trend(weeks)), width='stretch', key="contract_type")
-    with col_r2:
-        st.plotly_chart(permanent_ratio_line(_contract_trend(weeks)), width='stretch', key="permanent_ratio")
-    with col_c2:
-        st.plotly_chart(hours_bar(_hours_trend(weeks)), width='stretch', key="hours")
-
-    st.divider()
-    col_rw, col_aw = st.columns(2)
-    with col_rw:
-        st.plotly_chart(recruitment_window_line(_recruitment_window(weeks)), width='stretch', key="recruitment_window")
-    with col_aw:
-        st.plotly_chart(application_window_hist(_app_window(lookback_days)), width='stretch', key="app_window")
-
-    st.divider()
-    st.plotly_chart(upcoming_deadlines_bar(_deadlines()), width='stretch', key="deadlines")
-    st.caption("Currently-open jobs grouped by the week their application deadline falls — the recruiting pipeline ahead.")
+    with sub_timing:
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            st.plotly_chart(recruitment_window_line(_recruitment_window(weeks)), width='stretch', key="recruitment_window")
+        with col_t2:
+            st.plotly_chart(application_window_hist(_app_window(lookback_days)), width='stretch', key="app_window")
+        st.plotly_chart(upcoming_deadlines_bar(_deadlines()), width='stretch', key="deadlines")
+        st.caption("Currently-open jobs grouped by the week their application deadline falls — the recruiting pipeline ahead.")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROLES
