@@ -17,19 +17,24 @@ One row per unique listing, keyed by `job_id`.
 | `salary_raw` | TEXT | RSS desc (`Salary:` line) | ~83% | Verbatim salary string, e.g. `£41,519 to £46,618 per annum`. "Not specified" ⇒ NULL after parsing. |
 | `salary_min` | REAL | parsed | ~83% | Lower £ bound. Hourly rates and values < £10,000 are excluded (see `parse_salary`). |
 | `salary_max` | REAL | parsed | ~83% | Upper £ bound; equals `salary_min` for single-value salaries. |
-| `closing_date` | TEXT (YYYY-MM-DD) | — | **0%** | **Not in the RSS feed.** Column exists; populated only by future detail-page enrichment. |
-| `contract_type` | TEXT | — | **0%** | **Not in the RSS feed.** `permanent` / `fixed-term` once enriched. |
-| `hours` | TEXT | — | **0%** | **Not in the RSS feed.** `full-time` / `part-time` / `flexible` once enriched. |
+| `closing_date` | TEXT (YYYY-MM-DD) | detail-page JSON-LD (`validThrough`) | enriched | Populated by enrichment, not RSS. NULL until a job is enriched. |
+| `contract_type` | TEXT | detail-page JSON-LD (`employmentType`) | enriched | `permanent` / `fixed-term`. |
+| `hours` | TEXT | detail-page JSON-LD (`employmentType`) | enriched | `full-time` / `part-time` / `flexible`. |
+| `location` | TEXT | detail-page JSON-LD (`addressLocality`) | enriched | Town/city, e.g. London, Cambridge. |
+| `region` | TEXT | detail-page JSON-LD (`addressRegion`/country) | enriched | UK nation (England/Scotland/Wales/Northern Ireland) or `International`. |
+| `enriched_at` | TEXT (ISO-8601 UTC) | enrichment | enriched | When the job was enriched. NULL ⇒ not yet processed (will be picked up next run). |
 | `category` | TEXT | feed slug | 100% | Which RSS feed it came from (see `config.RSS_FEEDS`). |
-| `url` | TEXT | RSS link | 100% | Canonical listing URL. |
+| `url` | TEXT | RSS link | 100% | Canonical listing URL; also the detail page fetched for enrichment. |
 | `first_seen` | TEXT (ISO-8601 UTC) | scraper | 100% | When this job_id was first observed. Drives all "new jobs over time" charts. |
 | `last_seen` | TEXT (ISO-8601 UTC) | scraper | 100% | Updated every scrape the job still appears. `last_seen - first_seen` ⇒ listing longevity. |
 
-> **The 0% columns are not a bug.** The jobs.ac.uk RSS `summary` carries only
-> institution, department, and salary. `closing_date` / `contract_type` / `hours`
-> require scraping each job's detail HTML page — see
-> [detail-page-enrichment.md](detail-page-enrichment.md). There is also **no location
-> column yet**; it would be added by the same enrichment work.
+> **"enriched" fill** means the column is populated for every job that has been
+> through detail-page enrichment (`enriched_at IS NOT NULL`). The RSS feed itself
+> carries only institution, department, and salary; `closing_date`,
+> `contract_type`, `hours`, `location`, and `region` all come from parsing the
+> schema.org `JobPosting` JSON-LD on each detail page — see
+> [detail-page-enrichment.md](detail-page-enrichment.md). The daily scrape enriches
+> up to 200 new jobs; `python -m scripts.enrich_backfill` clears any backlog.
 
 ## Table: `scrape_runs`
 
@@ -68,6 +73,12 @@ Built in `dashboard/charts.py`, laid out across tabs in `dashboard/app.py`.
 | Trends | Monthly postings by category | `seasonal_bar` | first_seen, category |
 | Trends | Avg salary floor by category over time | `salary_inflation_line` | salary_min, first_seen |
 | Trends | Salary transparency (% hiding pay) | `salary_transparency_line` | salary_min, first_seen |
+| Trends | Permanent vs fixed-term per week | `contract_type_bar` | contract_type (enriched) |
+| Trends | Permanent contract share % | `permanent_ratio_line` | contract_type (enriched) |
+| Trends | Full- vs part-time per week | `hours_bar` | hours (enriched) |
+| Trends | Application window length | `recruitment_window_line` | closing_date (enriched), first_seen |
+| Institutions | Jobs by UK nation / International | `region_bar` | region (enriched) |
+| Institutions | Top hiring locations | `top_locations_bar` | location (enriched) |
 | Roles | Postings by seniority band | `seniority_breakdown_bar` | title, salary_min |
 | Roles | Salary floor distribution | `salary_distribution_hist` | salary_min |
 | Roles | Most frequent title words | `title_frequency_bar` | title |
@@ -79,12 +90,6 @@ Built in `dashboard/charts.py`, laid out across tabs in `dashboard/app.py`.
 | Institutions | Recruitment concentration (HHI) | `market_concentration_line` | institution, first_seen |
 | Institutions | New vs returning recruiters | `new_vs_repeat_bar` | institution, first_seen |
 | Institutions | Listing longevity histogram | `longevity_histogram` | first_seen, last_seen |
-
-### Paused charts (await detail-page enrichment)
-
-These builders still exist but are not rendered, because their source columns are
-0%-filled: `recruitment_window_line`, `contract_type_bar`, `hours_bar`,
-`permanent_ratio_line`.
 
 ## Re-measuring fill rates
 

@@ -652,6 +652,52 @@ def salary_distribution_hist(rows: list[dict]) -> go.Figure:
     return _style_fig(fig)
 
 
+_NO_GEO_MSG = "No location data yet — runs after detail-page enrichment"
+
+
+def region_bar(rows: list[dict]) -> go.Figure:
+    """Horizontal bar: postings per UK nation, with International highlighted."""
+    if not rows:
+        return _empty(_NO_GEO_MSG)
+    df = pd.DataFrame(rows).sort_values("job_count")
+    df["colour"] = df["region"].apply(lambda r: _NEG if r == "International" else _ACCENT)
+    fig = go.Figure(go.Bar(
+        x=df["job_count"], y=df["region"],
+        orientation="h",
+        marker_color=df["colour"],
+        text=df["job_count"],
+        textposition="outside",
+        hovertemplate="%{y}: %{x} jobs<extra></extra>",
+    ))
+    fig.update_layout(
+        title="Jobs by UK nation / International",
+        xaxis_title="Jobs posted", yaxis_title="",
+        margin=dict(l=120),
+    )
+    return _style_fig(fig)
+
+
+def top_locations_bar(rows: list[dict]) -> go.Figure:
+    """Horizontal bar: top hiring towns/cities."""
+    if not rows:
+        return _empty(_NO_GEO_MSG)
+    df = pd.DataFrame(rows).sort_values("job_count")
+    fig = go.Figure(go.Bar(
+        x=df["job_count"], y=df["location"],
+        orientation="h",
+        marker_color=_ACCENT,
+        text=df["job_count"],
+        textposition="outside",
+        hovertemplate="%{y}: %{x} jobs<extra></extra>",
+    ))
+    fig.update_layout(
+        title="Top hiring locations",
+        xaxis_title="Jobs posted", yaxis_title="",
+        margin=dict(l=140),
+    )
+    return _style_fig(fig)
+
+
 def seniority_breakdown_bar(rows: list[dict]) -> go.Figure:
     """Horizontal bar: posting volume per seniority band, median floor on hover."""
     if not rows:

@@ -504,6 +504,41 @@ def _classify_seniority(title: str) -> str:
     return "Other / Unclassified"
 
 
+def jobs_by_region(days: int = 90) -> list[dict]:
+    """Posting counts per region (UK nation or 'International'), from enrichment."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT region, COUNT(*) AS job_count
+            FROM jobs
+            WHERE region IS NOT NULL
+              AND {_CLEAN_TS} >= datetime('now', :offset)
+            GROUP BY region
+            ORDER BY job_count DESC
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def top_locations(days: int = 90, limit: int = 15) -> list[dict]:
+    """Top hiring towns/cities by posting count, from enrichment."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT location, COUNT(*) AS job_count
+            FROM jobs
+            WHERE location IS NOT NULL
+              AND {_CLEAN_TS} >= datetime('now', :offset)
+            GROUP BY location
+            ORDER BY job_count DESC
+            LIMIT :lim
+            """,
+            {"offset": f"-{days} days", "lim": limit},
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def seniority_breakdown(days: int = 365) -> list[dict]:
     """Classify job titles into seniority bands; return count + median floor per band."""
     with get_connection() as conn:

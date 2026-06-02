@@ -34,13 +34,16 @@ from analysis.trends import (
     category_growth_wow,
     category_share_over_time,
     category_weekly_counts,
+    contract_type_trend,
     daily_new_jobs,
+    hours_trend,
     job_longevity_distribution,
     monthly_postings,
     overall_summary,
     salary_by_month,
     salary_trends_by_category,
     title_word_frequency,
+    recruitment_window_trends,
     market_concentration_trends,
     salary_percentile_trends,
     keyword_salary_premiums,
@@ -48,13 +51,17 @@ from analysis.trends import (
     salary_transparency_trend,
     salary_distribution,
     seniority_breakdown,
+    jobs_by_region,
+    top_locations,
 )
 from config import CATEGORY_LABELS
 from dashboard.charts import (
     category_growth_bar,
     category_share_area,
     category_weekly_bar,
+    contract_type_bar,
     daily_jobs_line,
+    hours_bar,
     institution_salary_scatter,
     longevity_histogram,
     new_vs_repeat_bar,
@@ -64,12 +71,16 @@ from dashboard.charts import (
     title_frequency_bar,
     top_institutions_bar,
     seasonal_heatmap,
+    recruitment_window_line,
     market_concentration_line,
     salary_percentile_bands,
     keyword_premium_bar,
+    permanent_ratio_line,
     salary_transparency_line,
     salary_distribution_hist,
     seniority_breakdown_bar,
+    region_bar,
+    top_locations_bar,
 )
 from db.queries import get_all_jobs, last_scrape_time
 
@@ -226,6 +237,21 @@ def _salary_dist(d):        return salary_distribution(days=d)
 @st.cache_data(ttl=300)
 def _seniority(d):          return seniority_breakdown(days=d)
 
+@st.cache_data(ttl=300)
+def _contract_trend(w):     return contract_type_trend(weeks=w)
+
+@st.cache_data(ttl=300)
+def _hours_trend(w):        return hours_trend(weeks=w)
+
+@st.cache_data(ttl=300)
+def _recruitment_window(w): return recruitment_window_trends(weeks=w)
+
+@st.cache_data(ttl=300)
+def _region(d):             return jobs_by_region(days=d)
+
+@st.cache_data(ttl=300)
+def _top_locations(d):      return top_locations(days=d, limit=15)
+
 weeks = max(1, lookback_days // 7)
 months = max(1, lookback_days // 30)
 
@@ -308,12 +334,21 @@ with t_trends:
 
     st.divider()
     st.plotly_chart(salary_transparency_line(_salary_transparency(weeks)), width='stretch', key="salary_transparency")
-    st.caption(
-        "Share of new postings that don't state a parseable salary. "
-        "Note: the jobs.ac.uk RSS feed does not include closing date, contract type, "
-        "or working hours, so those analyses are paused until detail-page enrichment "
-        "is added (see docs/detail-page-enrichment.md)."
-    )
+    st.caption("Share of new postings that don't state a parseable salary.")
+
+    st.divider()
+    st.caption("Closing date, contract type, and hours come from detail-page enrichment — they populate as jobs are enriched.")
+
+    col_l2, col_r2, col_c2 = st.columns(3)
+    with col_l2:
+        st.plotly_chart(contract_type_bar(_contract_trend(weeks)), width='stretch', key="contract_type")
+    with col_r2:
+        st.plotly_chart(permanent_ratio_line(_contract_trend(weeks)), width='stretch', key="permanent_ratio")
+    with col_c2:
+        st.plotly_chart(hours_bar(_hours_trend(weeks)), width='stretch', key="hours")
+
+    st.divider()
+    st.plotly_chart(recruitment_window_line(_recruitment_window(weeks)), width='stretch', key="recruitment_window")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROLES
@@ -408,6 +443,15 @@ with t_institutions:
             st.dataframe(df_sp, hide_index=True, width='stretch')
         else:
             st.info("No spikes detected in this window.")
+
+    st.divider()
+    st.subheader("Geography")
+    col_geo_l, col_geo_r = st.columns(2)
+    with col_geo_l:
+        st.plotly_chart(region_bar(_region(lookback_days)), width='stretch', key="region")
+    with col_geo_r:
+        st.plotly_chart(top_locations_bar(_top_locations(lookback_days)), width='stretch', key="top_locations")
+    st.caption("Location is parsed from each job's detail page; it fills in as enrichment runs.")
 
     st.divider()
 

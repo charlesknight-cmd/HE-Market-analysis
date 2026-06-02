@@ -15,8 +15,17 @@ All notable changes to this project are recorded here. Format loosely follows
   Wired into `scraper.run` (capped at 200/run, `--no-enrich` to skip) and a
   `scripts/enrich_backfill` script for the historical backlog. Tests in
   `tests/test_detail.py`.
+- Geographic charts on the Institutions tab: jobs by UK nation / International
+  (`region_bar`) and top hiring locations (`top_locations_bar`), backed by new
+  `jobs_by_region` / `top_locations` queries.
 - Project documentation: full `README.md`, `docs/architecture.md`,
   `docs/data-dictionary.md`, and this changelog.
+
+### Changed
+- Un-paused the four charts that depend on enrichment data (contract type,
+  permanent share, hours, recruitment window) now that those fields populate.
+- `docs/detail-page-enrichment.md` marked implemented (JSON-LD approach);
+  `docs/data-dictionary.md` updated for the new/now-populated columns and charts.
 - Git pre-commit hook (`.githooks/pre-commit`, enabled via `core.hooksPath`)
   that blocks commits which don't update `CHANGELOG.md`, with a documented
   `SKIP_CHANGELOG=1` bypass. Enable per clone with

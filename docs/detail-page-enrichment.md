@@ -1,7 +1,18 @@
-# Detail-Page Enrichment — Scoping
+# Detail-Page Enrichment
 
-**Status:** proposed / not yet built
+**Status:** ✅ implemented 2026-06-02 (see `scraper/detail.py`).
 **Author:** handover notes, 2026-06-02
+
+> **Implementation note:** the build turned out simpler than the scoping below
+> assumed. Each detail page embeds a complete schema.org `JobPosting` **JSON-LD**
+> block (`validThrough`, `employmentType`, `jobLocation.address`, `baseSalary`),
+> so we parse that one JSON object instead of scraping HTML or maintaining a
+> city→region map. `region` comes straight from `addressRegion` (UK nations) with
+> non-UK countries bucketed as "International". The rate-limiting, missing-only,
+> and backfill design below was implemented as written. The original scope is
+> retained for context.
+
+---
 
 ## Why
 
