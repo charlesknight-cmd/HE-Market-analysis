@@ -76,7 +76,12 @@ from db.queries import get_all_jobs, last_scrape_time
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
-st.set_page_config(page_title="HE Job Market Analysis", page_icon="📊", layout="wide")
+st.set_page_config(
+    page_title="HE Job Market Analysis",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
 # ── Password gate ─────────────────────────────────────────────────────────────
 
@@ -92,8 +97,16 @@ if _required_pwd:
             st.error("Incorrect password.")
         st.stop()
 
-st.title("HE Job Market Analysis")
-st.caption("Data sourced from jobs.ac.uk · refreshes daily at 07:00")
+_head_left, _head_right = st.columns([5, 1])
+with _head_left:
+    st.title("HE Job Market Analysis")
+    _last = last_scrape_time()
+    _scraped = f" · last scraped {_last[:16]} UTC" if _last else ""
+    st.caption(f"Data sourced from jobs.ac.uk · refreshes daily at 07:00{_scraped}")
+with _head_right:
+    with st.popover("⚙ Filters", width="stretch"):
+        lookback_days = st.slider("Lookback window (days)", 7, 180, 30, step=7)
+        st.caption("Charts cache for 5 minutes")
 
 # Inject premium visual custom CSS styles
 st.markdown("""
@@ -142,19 +155,6 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
-
-# ── Sidebar ───────────────────────────────────────────────────────────────────
-
-with st.sidebar:
-    st.header("Filters")
-    lookback_days = st.slider("Lookback window (days)", 7, 180, 30, step=7)
-    st.divider()
-    _last = last_scrape_time()
-    if _last:
-        st.caption(f"Last scraped: {_last[:16]} UTC")
-    else:
-        st.caption("No scrape recorded yet")
-    st.caption("Charts cache for 5 minutes")
 
 # ── Cached loaders ────────────────────────────────────────────────────────────
 

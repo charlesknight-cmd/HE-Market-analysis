@@ -48,6 +48,10 @@ def _style_fig(fig: go.Figure) -> go.Figure:
         ),
         legend=dict(font=dict(size=12, color=_INK)),
     )
+    # Soften every bar with rounded corners.
+    for trace in fig.data:
+        if trace.type == "bar":
+            trace.marker.cornerradius = 5
     fig.update_xaxes(
         gridcolor=_GRID, zerolinecolor=_GRID, linecolor=_GRID,
         title_font=dict(size=13, color=_INK), tickfont=dict(size=12, color=_INK),
@@ -91,7 +95,8 @@ def daily_jobs_line(rows: list[dict]) -> go.Figure:
         fig.add_trace(go.Scatter(
             x=df["day"], y=df["rolling_7d"],
             mode="lines", name="7-day avg",
-            line=dict(color="#F77F00", width=2.5),
+            line=dict(color="#F77F00", width=2.5, shape="spline"),
+            fill="tozeroy", fillcolor="rgba(247, 127, 0, 0.10)",
         ))
     fig.update_layout(
         title="New job postings per day",
@@ -467,7 +472,8 @@ def recruitment_window_line(rows: list[dict]) -> go.Figure:
     fig.add_trace(go.Scatter(
         x=df["week"], y=df["avg_window_days"],
         mode="lines+markers", name="Apply window",
-        line=dict(color=_ACCENT, width=2.5),
+        line=dict(color=_ACCENT, width=2.5, shape="spline"),
+        fill="tozeroy", fillcolor="rgba(67, 97, 238, 0.10)",
         hovertemplate="Week %{x}<br>Avg Apply Window: %{y:.1f} days<extra></extra>"
     ))
     fig.update_layout(
@@ -488,7 +494,8 @@ def market_concentration_line(rows: list[dict]) -> go.Figure:
     fig.add_trace(go.Scatter(
         x=df["week"], y=df["hhi"],
         mode="lines+markers", name="HHI Index",
-        line=dict(color="#7209B7", width=2.5),
+        line=dict(color="#7209B7", width=2.5, shape="spline"),
+        fill="tozeroy", fillcolor="rgba(114, 9, 183, 0.09)",
         hovertemplate="Week %{x}<br>HHI Concentration: %{y}<br>Volume: %{customdata} jobs<extra></extra>",
         customdata=df["total_jobs"]
     ))
@@ -585,7 +592,8 @@ def permanent_ratio_line(rows: list[dict]) -> go.Figure:
     fig.add_trace(go.Scatter(
         x=pivoted["week"], y=pivoted["ratio"],
         mode="lines+markers", name="% Permanent",
-        line=dict(color=_POS, width=2.5),
+        line=dict(color=_POS, width=2.5, shape="spline"),
+        fill="tozeroy", fillcolor="rgba(6, 167, 125, 0.10)",
         hovertemplate="Week %{x}<br>Permanent Jobs: %{y}%<extra></extra>"
     ))
     fig.update_layout(
