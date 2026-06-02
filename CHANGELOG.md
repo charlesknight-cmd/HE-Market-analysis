@@ -22,6 +22,8 @@ All notable changes to this project are recorded here. Format loosely follows
   `docs/data-dictionary.md`, and this changelog.
 
 ### Changed
+- Region parsing: UK jobs with no nation in the markup are now labelled
+  "UK (unspecified)" instead of leaking a bare "United Kingdom" country string.
 - Un-paused the four charts that depend on enrichment data (contract type,
   permanent share, hours, recruitment window) now that those fields populate.
 - `docs/detail-page-enrichment.md` marked implemented (JSON-LD approach);

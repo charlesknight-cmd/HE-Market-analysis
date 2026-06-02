@@ -85,10 +85,16 @@ def _parse_location(job: dict) -> tuple[str | None, str | None]:
     region_raw = (addr.get("addressRegion") or "").strip()
     country = (addr.get("addressCountry") or "").strip()
 
+    _UK_NATIONS = {"england", "scotland", "wales", "northern ireland"}
     if country and country.lower() not in _UK_COUNTRIES:
         region = "International"
+    elif region_raw.lower() in _UK_NATIONS:
+        region = region_raw
+    elif locality or country:
+        # UK job with no nation in the markup — don't leak a bare country string.
+        region = "UK (unspecified)"
     else:
-        region = region_raw or (country or None)
+        region = None
     return locality, region
 
 
