@@ -633,6 +633,22 @@ def _median_salary_by(column: str, days: int, min_jobs: int) -> list[dict]:
     return sorted(result, key=lambda x: x["median_salary"], reverse=True)
 
 
+def region_category_matrix(days: int = 180) -> list[dict]:
+    """Posting counts per region × category — fuels the concentration heatmap."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT region, category, COUNT(*) AS job_count
+            FROM jobs
+            WHERE region IS NOT NULL
+              AND {_CLEAN_TS} >= datetime('now', :offset)
+            GROUP BY region, category
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def salary_by_region(days: int = 180, min_jobs: int = 3) -> list[dict]:
     """Median salary floor per region (UK nation / International)."""
     return _median_salary_by("region", days, min_jobs)

@@ -57,6 +57,7 @@ from analysis.trends import (
     upcoming_deadlines,
     salary_by_region,
     salary_by_contract_type,
+    region_category_matrix,
 )
 from config import CATEGORY_LABELS
 from dashboard.charts import (
@@ -89,6 +90,8 @@ from dashboard.charts import (
     upcoming_deadlines_bar,
     salary_by_region_bar,
     salary_by_contract_bar,
+    region_category_heatmap,
+    region_choropleth,
 )
 from db.queries import get_all_jobs, last_scrape_time
 
@@ -271,6 +274,9 @@ def _salary_region(d):      return salary_by_region(days=max(d, 90))
 
 @st.cache_data(ttl=300)
 def _salary_contract(d):    return salary_by_contract_type(days=max(d, 90))
+
+@st.cache_data(ttl=300)
+def _region_matrix(d):      return region_category_matrix(days=d)
 
 weeks = max(1, lookback_days // 7)
 months = max(1, lookback_days // 30)
@@ -480,11 +486,19 @@ with t_institutions:
     st.subheader("Geography")
     col_geo_l, col_geo_r = st.columns(2)
     with col_geo_l:
-        st.plotly_chart(region_bar(_region(lookback_days)), width='stretch', key="region")
+        st.plotly_chart(region_choropleth(_region(lookback_days)), width='stretch', key="region_map")
     with col_geo_r:
+        st.plotly_chart(region_bar(_region(lookback_days)), width='stretch', key="region")
+
+    col_geo_l2, col_geo_r2 = st.columns(2)
+    with col_geo_l2:
         st.plotly_chart(top_locations_bar(_top_locations(lookback_days)), width='stretch', key="top_locations")
-    st.plotly_chart(salary_by_region_bar(_salary_region(lookback_days)), width='stretch', key="salary_region")
-    st.caption("Location and salary are parsed from each job's detail page; they fill in as enrichment runs.")
+    with col_geo_r2:
+        st.plotly_chart(salary_by_region_bar(_salary_region(lookback_days)), width='stretch', key="salary_region")
+
+    st.plotly_chart(region_category_heatmap(_region_matrix(lookback_days)), width='stretch', key="region_category")
+    st.caption("Location and salary are parsed from each job's detail page. The map and bar cover UK nations; "
+               "International roles appear in the bar but not the map.")
 
     st.divider()
 

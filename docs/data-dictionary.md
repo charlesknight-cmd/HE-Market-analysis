@@ -82,6 +82,8 @@ Built in `dashboard/charts.py`, laid out across tabs in `dashboard/app.py`.
 | Trends | Upcoming deadlines by week | `upcoming_deadlines_bar` | closing_date (enriched) |
 | Roles | Median salary: permanent vs fixed-term | `salary_by_contract_bar` | contract_type (enriched), salary_min |
 | Institutions | Median salary by region | `salary_by_region_bar` | region (enriched), salary_min |
+| Institutions | UK postings choropleth map | `region_choropleth` | region (enriched) + bundled uk_nations.geojson |
+| Institutions | Region × category concentration | `region_category_heatmap` | region, category (enriched) |
 | Institutions | Jobs by UK nation / International | `region_bar` | region (enriched) |
 | Institutions | Top hiring locations | `top_locations_bar` | location (enriched) |
 | Roles | Postings by seniority band | `seniority_breakdown_bar` | title, salary_min |

@@ -23,6 +23,10 @@ All notable changes to this project are recorded here. Format loosely follows
   median salary by region (`salary_by_region_bar`), and median salary by contract
   type (`salary_by_contract_bar`). `date_posted`, `closing_date`, and region added
   to the Data tab table.
+- UK choropleth map of postings by nation (`region_choropleth`), backed by a
+  bundled `dashboard/assets/uk_nations.geojson` (merged from georgique/world-geojson,
+  OGL-licensed ONS/OS data), and a region × category concentration heatmap
+  (`region_category_heatmap` + `region_category_matrix` query).
 - Project documentation: full `README.md`, `docs/architecture.md`,
   `docs/data-dictionary.md`, and this changelog.
 

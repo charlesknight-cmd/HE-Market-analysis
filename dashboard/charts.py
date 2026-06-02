@@ -1,9 +1,25 @@
 """Reusable Plotly figure builders."""
 
+import json
+from pathlib import Path
+
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 from config import CATEGORY_LABELS
+
+_UK_NATIONS = ["England", "Scotland", "Wales", "Northern Ireland"]
+_GEOJSON_PATH = Path(__file__).parent / "assets" / "uk_nations.geojson"
+_UK_GEOJSON = None
+
+
+def _uk_geojson() -> dict:
+    """Lazily load and cache the bundled UK-nations boundary GeoJSON."""
+    global _UK_GEOJSON
+    if _UK_GEOJSON is None:
+        with open(_GEOJSON_PATH, encoding="utf-8") as f:
+            _UK_GEOJSON = json.load(f)
+    return _UK_GEOJSON
 
 _PALETTE = {
     "academic-or-research":       "#4361EE",
@@ -803,3 +819,54 @@ def salary_by_contract_bar(rows: list[dict]) -> go.Figure:
     if rows:
         rows = [{**r, "group": r["group"].replace("-", " ").title()} for r in rows]
     return _median_salary_bar(rows, df_title)
+
+
+def region_category_heatmap(rows: list[dict]) -> go.Figure:
+    """Heatmap: posting counts across region (y) × category (x)."""
+    if not rows:
+        return _empty(_NO_GEO_MSG)
+    df = pd.DataFrame(rows)
+    df["cat"] = df["category"].map(_label)
+    pivot = df.pivot_table(index="region", columns="cat",
+                           values="job_count", aggfunc="sum", fill_value=0)
+    # Order regions by total volume so the busiest sit at the top.
+    pivot = pivot.loc[pivot.sum(axis=1).sort_values().index]
+    fig = go.Figure(go.Heatmap(
+        z=pivot.values, x=list(pivot.columns), y=list(pivot.index),
+        colorscale="Blues",
+        hovertemplate="%{y} · %{x}<br>%{z} jobs<extra></extra>",
+        colorbar_title="Jobs",
+    ))
+    fig.update_layout(
+        title="Where job types concentrate (region × category)",
+        xaxis_title="", yaxis_title="",
+        xaxis=dict(tickangle=-30),
+    )
+    return _style_fig(fig)
+
+
+def region_choropleth(rows: list[dict]) -> go.Figure:
+    """Choropleth map: job postings shaded by UK nation."""
+    if not rows:
+        return _empty(_NO_GEO_MSG)
+    df = pd.DataFrame(rows)
+    df = df[df["region"].isin(_UK_NATIONS)]
+    if df.empty:
+        return _empty("No UK-nation location data yet")
+    fig = go.Figure(go.Choropleth(
+        geojson=_uk_geojson(),
+        locations=df["region"],
+        z=df["job_count"],
+        featureidkey="properties.name",
+        colorscale="Blues",
+        marker_line_color="white", marker_line_width=0.6,
+        colorbar_title="Jobs",
+        hovertemplate="%{location}<br>%{z} jobs<extra></extra>",
+    ))
+    fig.update_geos(fitbounds="locations", visible=False,
+                    projection_type="mercator", bgcolor="rgba(0,0,0,0)")
+    fig.update_layout(
+        title="UK job postings by nation",
+        margin=dict(l=10, r=10, t=70, b=10),
+    )
+    return _style_fig(fig)
