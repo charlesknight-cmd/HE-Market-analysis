@@ -1,0 +1,39 @@
+#!/bin/sh
+# Enforce that every commit updates CHANGELOG.md.
+#
+# Rationale: keep the changelog a living record rather than a doc that rots.
+# Add your entry under the [Unreleased] section.
+#
+# Bypass when a changelog entry genuinely doesn't apply:
+#   SKIP_CHANGELOG=1 git commit ...      (explicit, recommended)
+#   git commit --no-verify ...           (skips all hooks)
+#
+# This hook is shared via core.hooksPath=.githooks — see README "Development".
+
+if [ "$SKIP_CHANGELOG" = "1" ]; then
+    exit 0
+fi
+
+staged=$(git diff --cached --name-only)
+[ -z "$staged" ] && exit 0
+
+# CHANGELOG.md already staged with changes? All good.
+if printf '%s\n' "$staged" | grep -qx 'CHANGELOG.md'; then
+    exit 0
+fi
+
+# Paths that don't, on their own, warrant a changelog entry.
+ignore_re='^(CHANGELOG\.md|\.githooks/.*|\.gitignore|\.gitattributes|LICENSE|.*\.lock)$'
+needs_entry=$(printf '%s\n' "$staged" | grep -vE "$ignore_re")
+
+if [ -n "$needs_entry" ]; then
+    echo "✖ Commit blocked: CHANGELOG.md was not updated."
+    echo ""
+    echo "  Add an entry under [Unreleased] in CHANGELOG.md describing this change."
+    echo "  If a changelog entry truly doesn't apply, bypass with:"
+    echo "      SKIP_CHANGELOG=1 git commit ..."
+    echo ""
+    exit 1
+fi
+
+exit 0

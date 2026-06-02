@@ -113,6 +113,19 @@ The dashboard can be password-gated by setting `password` in
 See `deploy/` for the systemd unit, nginx config, and setup script, and
 [docs/architecture.md](docs/architecture.md) for the full topology.
 
+## Development
+
+This repo ships a git pre-commit hook (in `.githooks/`) that blocks a commit
+unless `CHANGELOG.md` is updated, keeping the changelog current. Enable it once
+per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Add your entry under the `[Unreleased]` section of `CHANGELOG.md`. If a change
+genuinely doesn't warrant an entry, bypass with `SKIP_CHANGELOG=1 git commit ...`.
+
 ## Tests
 
 ```bash

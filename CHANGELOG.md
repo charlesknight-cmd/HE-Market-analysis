@@ -8,6 +8,11 @@ All notable changes to this project are recorded here. Format loosely follows
 ### Added
 - Project documentation: full `README.md`, `docs/architecture.md`,
   `docs/data-dictionary.md`, and this changelog.
+- Git pre-commit hook (`.githooks/pre-commit`, enabled via `core.hooksPath`)
+  that blocks commits which don't update `CHANGELOG.md`, with a documented
+  `SKIP_CHANGELOG=1` bypass. Enable per clone with
+  `git config core.hooksPath .githooks` (see README "Development").
+- `.gitattributes` forcing LF line endings on shell scripts and hooks.
 
 ## [0.5.0] — 2026-06-02
 
