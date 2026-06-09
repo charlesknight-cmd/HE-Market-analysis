@@ -5,6 +5,14 @@ All notable changes to this project are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+- **Database backup script + nightly cron.** `scripts/backup_db.py` takes a
+  consistent, gzipped snapshot of `data/jobs.db` via SQLite's online backup API
+  (WAL-aware, safe to run while the scraper writes) into `backups/` (gitignored),
+  and prunes snapshots older than 30 days. Wired into a nightly server cron at
+  06:00 UTC. The repo backs up code; this protects the collected data, which
+  lives only on the server.
+
 ### Changed
 - **Dashboard tuned for the 21-discipline taxonomy.** Replaced the 6-colour
   job-type palette with a 48-hue qualitative map keyed across all disciplines
