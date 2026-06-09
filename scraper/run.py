@@ -13,7 +13,7 @@ import schedule
 import time
 
 from config import SCHEDULE_TIME
-from db.queries import bulk_upsert, log_run
+from db.queries import bulk_upsert, existing_job_ids, log_run
 from db.schema import init_db
 from scraper.fetcher import fetch_all
 from scraper.detail import run_enrichment
@@ -26,7 +26,9 @@ def run_once(enrich: bool = True) -> None:
     started = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     print(f"\n[{started}] Starting scrape...")
 
-    results = fetch_all()
+    # Listings are newest-first, so passing the IDs we already hold lets each
+    # category stop paging as soon as it reaches jobs we've seen before.
+    results = fetch_all(known_ids=existing_job_ids())
 
     total_new = total_updated = total_found = 0
     for slug, (jobs, error) in results.items():
@@ -74,7 +76,7 @@ def main() -> None:
     parser.add_argument(
         "--no-enrich",
         action="store_true",
-        help="Skip the detail-page enrichment step (RSS upsert only)",
+        help="Skip the detail-page enrichment step (listing scrape + upsert only)",
     )
     args = parser.parse_args()
 

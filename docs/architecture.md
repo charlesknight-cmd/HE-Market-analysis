@@ -3,11 +3,11 @@
 ## Data flow
 
 ```
-jobs.ac.uk RSS (6 feeds)
-        │   scraper/fetcher.py  — parallel download (ThreadPoolExecutor), config.REQUEST_HEADERS
+jobs.ac.uk /search/<category> (6 categories)
+        │   scraper/fetcher.py  — parallel, paginated, incremental download (ThreadPoolExecutor)
         ▼
-   feedparser entries
-        │   scraper/parser.py   — parse_entry / parse_description / parse_salary
+   search-result HTML pages
+        │   scraper/parser.py   — parse_listing_html / parse_listing_card / parse_salary
         ▼
    clean job dicts
         │   db/queries.py       — bulk_upsert (dedupe by job_id; update last_seen)
@@ -21,7 +21,7 @@ jobs.ac.uk RSS (6 feeds)
 
 A scrape run is orchestrated by `scraper/run.py`:
 
-- `run_once()` — fetch all feeds, parse, `bulk_upsert`, and `log_run` into `scrape_runs`.
+- `run_once()` — fetch all categories, parse, `bulk_upsert`, and `log_run` into `scrape_runs`.
 - `run_daemon()` — run once, then `schedule` a daily repeat at `config.SCHEDULE_TIME`.
   (In production a **cron job** is used instead of daemon mode — see below.)
 
@@ -29,12 +29,12 @@ A scrape run is orchestrated by `scraper/run.py`:
 
 | Layer | Module | Responsibility |
 |-------|--------|----------------|
-| Config | `config.py` | Feed URLs, category labels, schedule time, alert thresholds, HTTP headers, DB path |
-| Scrape | `scraper/fetcher.py` | Download all RSS feeds in parallel |
-| Scrape | `scraper/parser.py` | Turn feedparser entries into clean job dicts; normalise salary/closing-date/contract/hours |
+| Config | `config.py` | Search URLs, pagination/politeness, category labels, schedule time, alert thresholds, HTTP headers, DB path |
+| Scrape | `scraper/fetcher.py` | Download all categories in parallel; paginate per category, stopping early on already-seen jobs |
+| Scrape | `scraper/parser.py` | Turn search-result cards into clean job dicts; normalise salary/dates; infer year on year-less listing dates |
 | Scrape | `scraper/run.py` | CLI entry point; one-shot and daemon orchestration |
 | Persist | `db/schema.py` | Connection (WAL), schema creation, idempotent `_migrate`, index creation |
-| Persist | `db/queries.py` | `upsert_job`, `bulk_upsert`, `log_run`, `last_scrape_time`, `get_all_jobs`, `get_jobs_since` |
+| Persist | `db/queries.py` | `upsert_job`, `bulk_upsert`, `existing_job_ids`, `log_run`, `last_scrape_time`, `get_all_jobs`, `get_jobs_since` |
 | Analyse | `analysis/trends.py` | Time-series & statistical queries (volume, shares, salary percentiles, HHI, seniority, transparency, …) |
 | Analyse | `analysis/institutions.py` | Institution-level queries (top recruiters, spikes, salary, new-vs-repeat) |
 | Analyse | `analysis/alerts.py` | "Key market insights" — surges / elevated activity / trends, severity-sorted |

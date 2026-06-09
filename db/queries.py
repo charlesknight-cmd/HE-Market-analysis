@@ -10,6 +10,15 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
+# Keys the parameterised INSERTs bind by name. Guarantees they exist so a job
+# dict from any source can be upserted without a KeyError.
+_LISTING_DEFAULTS = {"location": None, "region": None, "date_posted": None}
+
+
+def _with_listing_defaults(job: dict[str, Any]) -> dict[str, Any]:
+    return {**_LISTING_DEFAULTS, **job}
+
+
 def upsert_job(conn: sqlite3.Connection, job: dict[str, Any]) -> str:
     """Insert a new job or update last_seen for an existing one.
 
@@ -26,18 +35,24 @@ def upsert_job(conn: sqlite3.Connection, job: dict[str, Any]) -> str:
         INSERT INTO jobs
             (job_id, title, institution, department, salary_raw,
              salary_min, salary_max, closing_date, contract_type, hours,
-             category, url, first_seen, last_seen)
+             location, region, date_posted, category, url, first_seen, last_seen)
         VALUES
             (:job_id, :title, :institution, :department, :salary_raw,
              :salary_min, :salary_max, :closing_date, :contract_type, :hours,
-             :category, :url, :now, :now)
+             :location, :region, :date_posted, :category, :url, :now, :now)
         ON CONFLICT(job_id) DO UPDATE SET
             last_seen     = excluded.last_seen,
             closing_date  = COALESCE(excluded.closing_date,  closing_date),
             contract_type = COALESCE(excluded.contract_type, contract_type),
-            hours         = COALESCE(excluded.hours,         hours)
+            hours         = COALESCE(excluded.hours,         hours),
+            location      = COALESCE(location, excluded.location),
+            region        = COALESCE(region,   excluded.region),
+            date_posted   = COALESCE(date_posted, excluded.date_posted),
+            salary_raw    = COALESCE(salary_raw, excluded.salary_raw),
+            salary_min    = COALESCE(salary_min, excluded.salary_min),
+            salary_max    = COALESCE(salary_max, excluded.salary_max)
         """,
-        {**job, "now": now},
+        {**_with_listing_defaults(job), "now": now},
     )
     return "updated" if already_exists else "new"
 
@@ -65,27 +80,38 @@ def bulk_upsert(jobs: list[dict[str, Any]]) -> tuple[int, int]:
                     INSERT INTO jobs
                         (job_id, title, institution, department, salary_raw,
                          salary_min, salary_max, closing_date, contract_type, hours,
-                         category, url, first_seen, last_seen)
+                         location, region, date_posted, category, url, first_seen, last_seen)
                     VALUES
                         (:job_id, :title, :institution, :department, :salary_raw,
                          :salary_min, :salary_max, :closing_date, :contract_type, :hours,
-                         :category, :url, :now, :now)
+                         :location, :region, :date_posted, :category, :url, :now, :now)
                     """,
-                    {**job, "now": now},
+                    {**_with_listing_defaults(job), "now": now},
                 )
                 new_count += 1
             else:
+                # Fill-if-empty for fields the listing now supplies, so jobs first
+                # seen before this column existed get backfilled without clobbering
+                # anything an enrichment pass already wrote.
                 conn.execute(
                     """
                     UPDATE jobs SET
                         last_seen     = ?,
                         closing_date  = COALESCE(?, closing_date),
                         contract_type = COALESCE(?, contract_type),
-                        hours         = COALESCE(?, hours)
+                        hours         = COALESCE(?, hours),
+                        location      = COALESCE(location, ?),
+                        region        = COALESCE(region, ?),
+                        date_posted   = COALESCE(date_posted, ?),
+                        salary_raw    = COALESCE(salary_raw, ?),
+                        salary_min    = COALESCE(salary_min, ?),
+                        salary_max    = COALESCE(salary_max, ?)
                     WHERE job_id = ?
                     """,
                     (now,
                      job.get("closing_date"), job.get("contract_type"), job.get("hours"),
+                     job.get("location"), job.get("region"), job.get("date_posted"),
+                     job.get("salary_raw"), job.get("salary_min"), job.get("salary_max"),
                      job["job_id"]),
                 )
                 updated_count += 1
@@ -111,6 +137,13 @@ def log_run(
             (_now(), category, jobs_found, jobs_new, jobs_updated, status, error),
         )
         conn.commit()
+
+
+def existing_job_ids() -> set[str]:
+    """Return every job_id already stored — used to stop paginating early."""
+    with get_connection() as conn:
+        rows = conn.execute("SELECT job_id FROM jobs").fetchall()
+    return {r["job_id"] for r in rows}
 
 
 def last_scrape_time() -> str | None:

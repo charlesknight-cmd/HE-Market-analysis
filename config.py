@@ -2,15 +2,30 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "data" / "jobs.db"
 
-# jobs.ac.uk RSS feeds by job type — one entry per category
-RSS_FEEDS = {
-    "academic-or-research":       "https://www.jobs.ac.uk/jobs/academic-or-research/?format=rss",
-    "professional-or-managerial": "https://www.jobs.ac.uk/jobs/professional-or-managerial/?format=rss",
-    "technical":                  "https://www.jobs.ac.uk/jobs/technical/?format=rss",
-    "clerical":                   "https://www.jobs.ac.uk/jobs/clerical/?format=rss",
-    "further-education":          "https://www.jobs.ac.uk/jobs/further-education/?format=rss",
-    "craft-or-manual":            "https://www.jobs.ac.uk/jobs/craft-or-manual/?format=rss",
+# jobs.ac.uk retired its RSS feeds (~June 2026 — the old ?format=rss URLs now
+# 500 or return HTML). We scrape the server-rendered search-results pages
+# instead; they carry MORE than the old feed did (location, closing date and
+# date placed are all in the listing). One entry per job-type category.
+SEARCH_BASE = "https://www.jobs.ac.uk/search"
+SEARCH_FEEDS = {
+    slug: f"{SEARCH_BASE}/{slug}"
+    for slug in (
+        "academic-or-research",
+        "professional-or-managerial",
+        "technical",
+        "clerical",
+        "further-education",
+        "craft-or-manual",
+    )
 }
+
+# Pagination + politeness. jobs.ac.uk caps page size at 25 (larger values are
+# ignored or return empty), so we step startIndex by PAGE_SIZE. Listings are
+# sorted newest-first, so the daily scrape stops once it hits a page of jobs it
+# already knows; MAX_PAGES_PER_CATEGORY only bounds the first post-outage catch-up.
+PAGE_SIZE = 25
+MAX_PAGES_PER_CATEGORY = 60
+PAGE_DELAY = 1.0  # seconds between page requests (per category)
 
 # Friendly display names for each category
 CATEGORY_LABELS = {

@@ -1,17 +1,17 @@
 """Unit tests for the pure parsing functions in scraper/parser.py.
 
 These functions carry the most logic and are the most likely to silently rot as
-jobs.ac.uk's feed formatting drifts. The fixtures below mirror the real
-description shape:
-
-    Institution - Faculty<br />Salary: £x to £y<br />Closing Date: ...<br />
-    Contract Type: ...<br />Hours: ...
+jobs.ac.uk's site markup drifts. The HTML fixture below mirrors the real
+search-result card structure (`.j-search-result__result`).
 """
+
+from datetime import date
 
 from scraper.parser import (
     extract_job_id,
-    parse_description,
+    parse_listing_html,
     parse_salary,
+    _infer_listing_date,
     _parse_closing_date,
     _parse_contract_type,
     _parse_hours,
@@ -109,47 +109,110 @@ class TestParseHours:
         assert _parse_hours("Shift work") is None
 
 
-class TestParseDescription:
-    def test_full_description(self):
-        raw = (
-            "University of Example - Faculty of Science<br />"
-            "Salary: £40,000 to £50,000<br />"
-            "Closing Date: 15 June 2026<br />"
-            "Contract Type: Fixed-term<br />"
-            "Hours: Full Time"
-        )
-        result = parse_description(raw)
-        assert result["institution"] == "University of Example"
-        assert result["department"] == "Faculty of Science"
-        assert result["salary_raw"] == "£40,000 to £50,000"
-        assert result["closing_date"] == "2026-06-15"
-        assert result["contract_type"] == "fixed-term"
-        assert result["hours"] == "full-time"
+class TestInferListingDate:
+    REF = date(2026, 6, 9)  # a Tuesday in June
 
-    def test_institution_only(self):
-        result = parse_description("University of Example<br />Salary: £30,000")
-        assert result["institution"] == "University of Example"
-        assert result["department"] is None
-        assert result["salary_raw"] == "£30,000"
+    def test_placed_date_uses_current_year(self):
+        # "Date placed" on/before today -> this year
+        assert _infer_listing_date("09 Jun", self.REF, "past") == "2026-06-09"
 
-    def test_first_salary_line_wins(self):
-        # Guard against a second Salary: line overwriting the first
-        raw = "Inst<br />Salary: £40,000<br />Salary: £99,000"
-        assert parse_description(raw)["salary_raw"] == "£40,000"
+    def test_placed_date_in_future_rolls_back(self):
+        # A placed date that lands in the future must be last year
+        assert _infer_listing_date("15 Dec", self.REF, "past") == "2025-12-15"
 
-    def test_div_and_p_tag_formatting(self):
-        # Broadened split must handle <p>/<div> styles, not just <br>
-        raw = "<p>Inst - Dept</p><p>Salary: £30,000</p>"
-        result = parse_description(raw)
-        assert result["institution"] == "Inst"
-        assert result["department"] == "Dept"
-        assert result["salary_raw"] == "£30,000"
+    def test_closing_date_uses_current_year(self):
+        assert _infer_listing_date("30 Jun", self.REF, "future") == "2026-06-30"
 
-    def test_html_entities_unescaped(self):
-        result = parse_description("Smith &amp; Jones University<br />Salary: £30,000")
-        assert result["institution"] == "Smith & Jones University"
+    def test_closing_date_in_past_rolls_forward(self):
+        # A closing date that lands in the past must be next year
+        assert _infer_listing_date("01 Jan", self.REF, "future") == "2027-01-01"
 
-    def test_empty_input(self):
-        result = parse_description("")
-        assert result["institution"] is None
-        assert result["salary_raw"] is None
+    def test_full_month_name(self):
+        assert _infer_listing_date("3 September", self.REF, "future") == "2026-09-03"
+
+    def test_unparseable_returns_none(self):
+        assert _infer_listing_date("soon", self.REF, "future") is None
+
+
+# A trimmed-down but structurally faithful copy of two real result cards.
+_LISTING_HTML = """
+<div id="job-listings">
+  <div class="j-search-result__result ie-border-left" data-advert-id="1078028">
+    <div class="j-search-result__text">
+      <a href="/job/DRV582/full-professor-in-law">Full Professor in Law</a>
+      <div class="j-search-result__department">Faculty of Law</div>
+      <div class="j-search-result__employer"><b>National University of Singapore</b></div>
+      <div>Location: Singapore</div>
+      <div class="j-search-result__info"><strong>Salary: </strong>Not Specified</div>
+      <div><strong>Date Placed: </strong>09 Jun</div>
+    </div>
+    <div class="j-search-result__date-logos">
+      <div class="j-search-result__date">
+        <span class="j-search-result__date-span j-search-result__date">Closes</span>
+        <span class="j-search-result__date-span j-search-result__date--blue ">30 Jun</span>
+      </div>
+    </div>
+  </div>
+  <div class="j-search-result__result ie-border-left" data-advert-id="1078030">
+    <div class="j-search-result__text">
+      <a href="/job/DRV584/lecturer-in-food-chemistry">Assistant Lecturer in Food Chemistry</a>
+      <div class="j-search-result__department">Faculty of Science</div>
+      <div class="j-search-result__employer"><b>Atlantic Technological University</b></div>
+      <div>Location: Sligo</div>
+      <div class="j-search-result__info"><strong>Salary: </strong>£41,377.94 to £55,990.51</div>
+      <div><strong>Date Placed: </strong>09 Jun</div>
+    </div>
+    <div class="j-search-result__date-logos">
+      <div class="j-search-result__date">
+        <span class="j-search-result__date-span j-search-result__date">Closes</span>
+        <span class="j-search-result__date-span j-search-result__date--blue ">25 Jun</span>
+      </div>
+    </div>
+  </div>
+</div>
+"""
+
+
+class TestParseListingHTML:
+    REF = date(2026, 6, 9)
+
+    def _jobs(self):
+        return parse_listing_html(_LISTING_HTML, "academic-or-research", today=self.REF)
+
+    def test_finds_all_cards(self):
+        assert len(self._jobs()) == 2
+
+    def test_core_fields(self):
+        job = self._jobs()[0]
+        assert job["job_id"] == "DRV582"
+        assert job["title"] == "Full Professor in Law"
+        assert job["institution"] == "National University of Singapore"
+        assert job["department"] == "Faculty of Law"
+        assert job["location"] == "Singapore"
+        assert job["category"] == "academic-or-research"
+        assert job["url"] == "https://www.jobs.ac.uk/job/DRV582/full-professor-in-law"
+
+    def test_dates_inferred(self):
+        job = self._jobs()[0]
+        assert job["date_posted"] == "2026-06-09"
+        assert job["closing_date"] == "2026-06-30"
+
+    def test_not_specified_salary_is_none(self):
+        job = self._jobs()[0]
+        assert job["salary_raw"] is None
+        assert job["salary_min"] is None
+
+    def test_salary_range_parsed(self):
+        job = self._jobs()[1]
+        assert job["salary_min"] == 41377.0
+        assert job["salary_max"] == 55990.0
+
+    def test_enrichment_only_fields_are_none(self):
+        # contract_type / hours / region aren't in the listing
+        job = self._jobs()[0]
+        assert job["contract_type"] is None
+        assert job["hours"] is None
+        assert job["region"] is None
+
+    def test_empty_html(self):
+        assert parse_listing_html("", "technical") == []

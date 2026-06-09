@@ -1,19 +1,23 @@
-"""Parse raw feedparser entries into clean job dicts."""
+"""Parse jobs.ac.uk search-results HTML into clean job dicts.
+
+jobs.ac.uk retired its RSS feeds, so we scrape the server-rendered
+`/search/<category>` listing pages. Each result card carries the job title,
+employer, department, location, salary, date placed and closing date — which
+is more than the old feed provided. `parse_listing_html` turns one page of
+HTML into a list of job dicts shaped exactly like the rest of the pipeline
+expects (see `db.queries.bulk_upsert`).
+"""
 
 import re
-from datetime import datetime
-from html import unescape
-from typing import Any
+from datetime import date, datetime, timedelta, timezone
+
+from bs4 import BeautifulSoup
 
 
 def extract_job_id(url: str) -> str | None:
     """Pull the job reference code from a jobs.ac.uk URL (e.g. 'DRR304')."""
     m = re.search(r"/job/([A-Z0-9]+)/", url, re.IGNORECASE)
     return m.group(1).upper() if m else None
-
-
-def _strip_tags(text: str) -> str:
-    return re.sub(r"<[^>]+>", "", text).strip()
 
 
 def _parse_closing_date(text: str) -> str | None:
@@ -54,59 +58,44 @@ def _parse_hours(text: str) -> str | None:
     return None
 
 
-def parse_description(raw_desc: str) -> dict[str, str | None]:
-    """Extract institution, department, salary, closing date, contract type, and hours.
+def _infer_listing_date(daymon: str, today: date, prefer: str) -> str | None:
+    """Turn a year-less 'DD Mon' listing date into YYYY-MM-DD.
 
-    The description field looks like:
-        Institution Name - Faculty<br />Salary: £40,000 to £50,000<br />
-        Closing Date: 15 June 2026<br />Contract Type: Fixed-term<br />Hours: Full Time
+    The search listing prints dates without a year (e.g. "09 Jun"). We infer it
+    from `today`:
+      prefer='past'   — date placed is on/before today; if the day/month lands in
+                        the future it must belong to last year.
+      prefer='future' — closing/expiry date is on/after today; if it lands in the
+                        past it must belong to next year.
+    A couple of days' tolerance absorbs UTC/site-timezone skew.
     """
-    desc = unescape(raw_desc or "")
+    daymon = re.sub(r"\b(\d+)(?:st|nd|rd|th)\b", r"\1", daymon.strip(), flags=re.IGNORECASE)
+    # Parse against an explicit leap year (2000) so we only read month/day and
+    # avoid the "no year" deprecation; the real year is inferred below.
+    parsed = None
+    for fmt in ("%d %b %Y", "%d %B %Y"):
+        try:
+            parsed = datetime.strptime(f"{daymon} 2000", fmt)
+            break
+        except ValueError:
+            continue
+    if parsed is None:
+        return None
 
-    # Split on <br>, <p>, </p>, <div>, or </div> tags to handle multiple formatting styles
-    parts = re.split(r"<(?:br|p|/p|div|/div)\s*/?>", desc, flags=re.IGNORECASE)
-    # Filter out empty or whitespace-only lines
-    parts = [p.strip() for p in parts if p.strip()]
+    def _make(year: int) -> date | None:
+        try:
+            return date(year, parsed.month, parsed.day)
+        except ValueError:  # 29 Feb on a non-leap year
+            return None
 
-    institution = department = salary_raw = None
-    closing_date = contract_type = hours = None
-
-    if parts:
-        location_line = _strip_tags(parts[0])
-        segments = [s.strip() for s in location_line.split(" - ") if s.strip()]
-        if segments:
-            institution = segments[0]
-            if len(segments) > 1:
-                department = " - ".join(segments[1:])
-
-    for part in parts[1:]:
-        clean = _strip_tags(part)
-        cl = clean.lower()
-
-        if salary_raw is None and re.match(r"salary\s*:", cl):
-            # Guard: only take the first Salary: line (mirrors the old break behaviour)
-            salary_raw = re.sub(r"(?i)^salary\s*:\s*", "", clean).strip().rstrip(".")
-
-        elif re.match(r"closing\s*date\s*:", cl):
-            val = re.sub(r"(?i)^closing\s*date\s*:\s*", "", clean).strip()
-            closing_date = _parse_closing_date(val)
-
-        elif re.match(r"contract\s*(type)?\s*:", cl):
-            val = re.sub(r"(?i)^contract\s*(type)?\s*:\s*", "", clean).strip()
-            contract_type = _parse_contract_type(val)
-
-        elif re.match(r"hours?\s*:", cl):
-            val = re.sub(r"(?i)^hours?\s*:\s*", "", clean).strip()
-            hours = _parse_hours(val)
-
-    return {
-        "institution":   institution,
-        "department":    department,
-        "salary_raw":    salary_raw,
-        "closing_date":  closing_date,
-        "contract_type": contract_type,
-        "hours":         hours,
-    }
+    d = _make(today.year)
+    if d is None:
+        return None
+    if prefer == "past" and d > today + timedelta(days=2):
+        d = _make(today.year - 1) or d
+    elif prefer == "future" and d < today - timedelta(days=2):
+        d = _make(today.year + 1) or d
+    return d.strftime("%Y-%m-%d")
 
 
 def parse_salary(salary_raw: str | None) -> tuple[float | None, float | None]:
@@ -136,30 +125,103 @@ def parse_salary(salary_raw: str | None) -> tuple[float | None, float | None]:
     return values[0], values[1]
 
 
-def parse_entry(entry: Any, category: str) -> dict | None:
-    """Convert a feedparser entry to a job dict ready for DB insertion."""
-    url = entry.get("link", "")
+_BASE_URL = "https://www.jobs.ac.uk"
+
+
+def _clean(text: str | None) -> str | None:
+    """Collapse internal whitespace and trim; empty -> None."""
+    if not text:
+        return None
+    return re.sub(r"\s+", " ", text).strip() or None
+
+
+def _div_text_after_label(card, label: str) -> str | None:
+    """Return the text following a 'Label:' inside any <div> of the card.
+
+    Several fields (Location, Date Placed) are bare <div>s of the form
+    "Location: Oxford" with no distinguishing class, so we match on the label.
+    """
+    for div in card.find_all("div"):
+        text = _clean(div.get_text(" ", strip=True))
+        if text and text.lower().startswith(label.lower()):
+            return _clean(text[len(label):].lstrip(" :"))
+    return None
+
+
+def parse_listing_card(card, category: str, today: date | None = None) -> dict | None:
+    """Convert one `.j-search-result__result` element into a job dict."""
+    today = today or datetime.now(timezone.utc).date()
+
+    anchor = card.find("a", href=True)
+    if not anchor:
+        return None
+    href = anchor["href"]
+    url = _BASE_URL + href if href.startswith("/") else href
     job_id = extract_job_id(url)
     if not job_id:
         return None
 
-    title = entry.get("title", "").strip()
-    desc = entry.get("summary", "") or entry.get("description", "")
+    title = _clean(anchor.get_text(strip=True))
 
-    parsed = parse_description(desc)
-    salary_min, salary_max = parse_salary(parsed["salary_raw"])
+    dept_el = card.find(class_="j-search-result__department")
+    department = _clean(dept_el.get_text(" ", strip=True)) if dept_el else None
+
+    emp_el = card.find(class_="j-search-result__employer")
+    institution = _clean(emp_el.get_text(" ", strip=True)) if emp_el else None
+
+    location = _div_text_after_label(card, "Location:")
+
+    salary_raw = None
+    info_el = card.find(class_="j-search-result__info")
+    if info_el:
+        salary_raw = _clean(re.sub(
+            r"(?i)^salary\s*:\s*", "", info_el.get_text(" ", strip=True)
+        ))
+        if salary_raw:
+            salary_raw = salary_raw.rstrip(".") or None
+        if salary_raw and salary_raw.lower() == "not specified":
+            salary_raw = None
+
+    placed = _div_text_after_label(card, "Date Placed:")
+    date_posted = _infer_listing_date(placed, today, "past") if placed else None
+
+    # Closing date lives in <div class="j-search-result__date"> as the last <span>
+    # ("Closes"/"Expires" label first, then the "DD Mon" value).
+    closing_date = None
+    date_div = card.find("div", class_="j-search-result__date")
+    if date_div:
+        spans = date_div.find_all("span")
+        if spans:
+            closing_date = _infer_listing_date(spans[-1].get_text(strip=True), today, "future")
+
+    salary_min, salary_max = parse_salary(salary_raw)
 
     return {
         "job_id":        job_id,
         "title":         title,
-        "institution":   parsed["institution"],
-        "department":    parsed["department"],
-        "salary_raw":    parsed["salary_raw"],
+        "institution":   institution,
+        "department":    department,
+        "salary_raw":    salary_raw,
         "salary_min":    salary_min,
         "salary_max":    salary_max,
-        "closing_date":  parsed["closing_date"],
-        "contract_type": parsed["contract_type"],
-        "hours":         parsed["hours"],
+        "closing_date":  closing_date,
+        "contract_type": None,   # not in the listing — filled by detail enrichment
+        "hours":         None,   # not in the listing — filled by detail enrichment
+        "location":      location,
+        "region":        None,   # derived from JSON-LD by detail enrichment
+        "date_posted":   date_posted,
         "category":      category,
         "url":           url,
     }
+
+
+def parse_listing_html(html: str, category: str, today: date | None = None) -> list[dict]:
+    """Parse one search-results page into a list of job dicts (skips junk cards)."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    cards = soup.find_all(class_="j-search-result__result")
+    jobs = []
+    for card in cards:
+        job = parse_listing_card(card, category, today)
+        if job:
+            jobs.append(job)
+    return jobs

@@ -1,15 +1,16 @@
 # HE Market Analysis
 
 A tool that tracks the UK Higher Education job market. It scrapes job listings
-from [jobs.ac.uk](https://www.jobs.ac.uk) RSS feeds, stores them in SQLite, runs
+from [jobs.ac.uk](https://www.jobs.ac.uk), stores them in SQLite, runs
 trend analysis, and presents everything through a Streamlit dashboard.
 
 **Live dashboard:** https://jobs.charlesknight.co.uk
 
 ## What it does
 
-- **Scrapes** six jobs.ac.uk RSS feeds (one per job category) daily.
-- **Parses** institution, department, and salary from each listing.
+- **Scrapes** six jobs.ac.uk search-results listings (one per job category) daily.
+- **Parses** institution, department, salary, location, date placed, and closing
+  date from each listing.
 - **Stores** jobs in a local SQLite database (`data/jobs.db`, WAL mode), de-duplicated by job ID.
 - **Analyses** trends: posting volume, category shares, salary distributions and
   percentiles, seniority bands, institution concentration (HHI), recruiter churn,
@@ -19,17 +20,17 @@ trend analysis, and presents everything through a Streamlit dashboard.
 
 ## Stack
 
-Python · SQLite · [feedparser](https://feedparser.readthedocs.io) + requests
+Python · SQLite · [BeautifulSoup](https://www.crummy.com/software/BeautifulSoup/) + requests
 (scraping) · [Streamlit](https://streamlit.io) + [Plotly](https://plotly.com/python/)
 (dashboard) · `schedule` (optional daemon mode) · pytest (tests).
 
 ## Project layout
 
 ```
-config.py            Feed URLs, category labels, schedule time, alert thresholds, HTTP headers
-scraper/             RSS fetching and parsing
-  fetcher.py           Parallel RSS download (ThreadPoolExecutor)
-  parser.py            Extract institution/department/salary; normalise fields
+config.py            Search URLs, pagination/politeness, category labels, schedule, alert thresholds, HTTP headers
+scraper/             Listing fetching and parsing
+  fetcher.py           Parallel per-category download (ThreadPoolExecutor), paginated, incremental
+  parser.py            Parse search-result cards into clean job dicts; normalise fields
   run.py               CLI entry point (one-shot or --daemon)
 db/                  Persistence
   schema.py            Schema, WAL, idempotent migrations, indexes
@@ -74,17 +75,20 @@ python -m analysis.report
 streamlit run dashboard/app.py
 ```
 
-## Data source & its limitations
+## Data source
 
-Jobs come from the jobs.ac.uk RSS feeds listed in `config.RSS_FEEDS`. **The RSS
-feed is thin** — each entry only carries institution, department, and salary.
-It does **not** include closing date, contract type, working hours, or location.
-
-As a result those columns are currently unpopulated and a few charts are paused.
-Recovering them requires fetching each job's detail HTML page — see
-[docs/detail-page-enrichment.md](docs/detail-page-enrichment.md) for the plan.
-Field-by-field fill rates and caveats are documented in
-[docs/data-dictionary.md](docs/data-dictionary.md).
+Jobs come from the jobs.ac.uk search-results pages listed in `config.SEARCH_FEEDS`
+(one per job category). jobs.ac.uk **retired its RSS feeds** around June 2026 — the
+old `?format=rss` URLs now return HTTP 500 or HTML — so the scraper parses the
+server-rendered listing pages instead. Those carry more than the feed ever did:
+title, institution, department, salary, **location**, **date placed**, and
+**closing date** all appear in each result card. Listings are paginated
+(`?pageSize=25&startIndex=N`) and date-sorted, so the daily run pages from newest
+until it reaches jobs already in the DB (`MAX_PAGES_PER_CATEGORY` bounds the first
+catch-up). Contract type, working hours, and UK region/nation are still recovered
+from each job's detail-page JSON-LD by the enrichment step — see
+[docs/detail-page-enrichment.md](docs/detail-page-enrichment.md). Field-by-field
+fill rates are in [docs/data-dictionary.md](docs/data-dictionary.md).
 
 ## Deployment
 

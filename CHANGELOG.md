@@ -5,6 +5,24 @@ All notable changes to this project are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+### Changed
+- **Data source migrated from RSS to search-results HTML.** jobs.ac.uk retired
+  its RSS feeds (~June 2026): the old `?format=rss` URLs now return HTTP 500 or
+  an HTML page, so the daily scrape had been recording `0 jobs` since 2026-06-07.
+  `scraper/fetcher.py` and `scraper/parser.py` now fetch and parse the
+  server-rendered `/search/<category>` listing pages instead (BeautifulSoup
+  replaces feedparser). The listing is richer than the old feed: `location`,
+  `closing_date`, and `date_posted` are parsed straight from each result card
+  (year inferred for the year-less listing dates), so they no longer depend on
+  detail-page enrichment — only `contract_type`, `hours`, and `region` still do.
+  Pagination steps `startIndex` by 25 (the site's max page size); listings are
+  date-sorted so the daily run stops once it reaches already-seen jobs, bounded
+  by `config.MAX_PAGES_PER_CATEGORY` for the first catch-up. `config.RSS_FEEDS`
+  → `config.SEARCH_FEEDS`; `bulk_upsert` now persists/gap-fills location, region,
+  date_posted and salary; new `existing_job_ids` query feeds the incremental stop.
+  Parser tests rewritten for the HTML cards; `feedparser` dropped from
+  requirements, `beautifulsoup4` added.
+
 ### Added
 - **Detail-page enrichment pipeline.** `scraper/detail.py` fetches each job's
   detail page and parses the schema.org `JobPosting` JSON-LD block to recover

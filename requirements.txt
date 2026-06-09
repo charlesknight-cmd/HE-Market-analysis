@@ -1,4 +1,4 @@
-feedparser>=6.0
+beautifulsoup4>=4.12
 schedule>=1.2
 requests>=2.31
 streamlit>=1.35
