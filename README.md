@@ -8,7 +8,8 @@ trend analysis, and presents everything through a Streamlit dashboard.
 
 ## What it does
 
-- **Scrapes** six jobs.ac.uk search-results listings (one per job category) daily.
+- **Scrapes** jobs.ac.uk search-results listings across its 21 subject
+  disciplines (one filtered search per discipline) daily.
 - **Parses** institution, department, salary, location, date placed, and closing
   date from each listing.
 - **Stores** jobs in a local SQLite database (`data/jobs.db`, WAL mode), de-duplicated by job ID.
@@ -77,15 +78,21 @@ streamlit run dashboard/app.py
 
 ## Data source
 
-Jobs come from the jobs.ac.uk search-results pages listed in `config.SEARCH_FEEDS`
-(one per job category). jobs.ac.uk **retired its RSS feeds** around June 2026 — the
-old `?format=rss` URLs now return HTTP 500 or HTML — so the scraper parses the
-server-rendered listing pages instead. Those carry more than the feed ever did:
-title, institution, department, salary, **location**, **date placed**, and
-**closing date** all appear in each result card. Listings are paginated
-(`?pageSize=25&startIndex=N`) and date-sorted, so the daily run pages from newest
-until it reaches jobs already in the DB (`MAX_PAGES_PER_CATEGORY` bounds the first
-catch-up). Contract type, working hours, and UK region/nation are still recovered
+Jobs come from the jobs.ac.uk search-results pages, scraped one **subject
+discipline** at a time (the 21 disciplines in `config.DISCIPLINES`). Around June
+2026 jobs.ac.uk **retired its RSS feeds** (the old `?format=rss` URLs now return
+HTTP 500 or HTML) **and dropped its six job-type category routes** (which all now
+return the same unfiltered list). Its live taxonomy is subject disciplines,
+selected via the search facet `academicDisciplineFacet[]=<slug>` — so the scraper
+filters on that and stores the discipline in the `category` column. The
+server-rendered cards carry more than the old feed ever did: title, institution,
+department, salary, **location**, **date placed**, and **closing date**. Each
+discipline is paginated (`?academicDisciplineFacet[]=<slug>&pageSize=25&startIndex=N`,
+date-sorted), and the daily run pages from newest until it reaches jobs already in
+the DB (`MAX_PAGES_PER_CATEGORY` bounds the first catch-up; `scraper.run --full`
+forces a full re-page). The facet is in every request URL, so requests are
+stateless — important, because jobs.ac.uk otherwise tracks the active search per
+client. Contract type, working hours, and UK region/nation are still recovered
 from each job's detail-page JSON-LD by the enrichment step — see
 [docs/detail-page-enrichment.md](docs/detail-page-enrichment.md). Field-by-field
 fill rates are in [docs/data-dictionary.md](docs/data-dictionary.md).

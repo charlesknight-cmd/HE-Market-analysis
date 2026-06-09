@@ -26,7 +26,7 @@ One row per unique listing, keyed by `job_id`.
 | `region` | TEXT | detail-page JSON-LD (`addressRegion`/country) | enriched | UK nation (England/Scotland/Wales/Northern Ireland), `International`, or `UK (unspecified)`. The listing gives only a town, so region is still derived by enrichment. |
 | `date_posted` | TEXT (YYYY-MM-DD) | listing (`Date Placed:`), year inferred | ~100% | Advertised posting date, from the card. Drives the recruitment-window calc (`closing_date − date_posted`). Enrichment confirms it from JSON-LD `datePosted`. |
 | `enriched_at` | TEXT (ISO-8601 UTC) | enrichment | enriched | When the job was enriched. NULL ⇒ not yet processed (will be picked up next run). |
-| `category` | TEXT | search slug | 100% | Which category listing it came from (see `config.SEARCH_FEEDS`). |
+| `category` | TEXT | discipline facet slug | 100% | Subject discipline the job was scraped under (see `config.DISCIPLINES`), e.g. `computer-sciences`. A job may span disciplines; it's stored under the first one scraped. Rows from before the 2026-06-09 taxonomy change hold a legacy job-type slug (`academic-or-research`, …) and age out. |
 | `url` | TEXT | listing (card title link) | 100% | Canonical listing URL; also the detail page fetched for enrichment. |
 | `first_seen` | TEXT (ISO-8601 UTC) | scraper | 100% | When this job_id was first observed. Drives all "new jobs over time" charts. |
 | `last_seen` | TEXT (ISO-8601 UTC) | scraper | 100% | Updated every scrape the job still appears. `last_seen - first_seen` ⇒ listing longevity. |
@@ -55,13 +55,18 @@ One row per feed per scrape — operational audit log.
 | `status` | TEXT | `ok` or `error`. |
 | `error` | TEXT | Error detail when `status = error`. |
 
-## Category slugs
+## Category slugs (subject disciplines)
 
-`academic-or-research`, `professional-or-managerial`, `technical`, `clerical`,
-`further-education`, `craft-or-manual`. Display names are in
-`config.CATEGORY_LABELS`. **`technical`, `clerical`, and `craft-or-manual` feeds
-are typically sparse or empty.** Current data is dominated by academic-or-research
-and professional-or-managerial.
+Since 2026-06-09 `category` holds one of jobs.ac.uk's 21 subject-discipline slugs
+— e.g. `biological-sciences`, `computer-sciences`, `engineering-and-technology`,
+`health-and-medical`, `law`, `psychology`, `social-sciences-and-social-care`. The
+full slug→name map is `config.DISCIPLINES`. The largest disciplines are Health &
+Medical, Computer Sciences, and Engineering & Technology (each ~330–360 live
+postings); the long tail (Agriculture, Sport & Leisure, …) runs to a few dozen.
+
+Rows scraped before that date carry a **legacy job-type slug** (`academic-or-research`,
+`professional-or-managerial`, `further-education`, …) from the retired feed
+taxonomy and are not re-categorised; they age out as those listings expire.
 
 ## Chart catalogue
 

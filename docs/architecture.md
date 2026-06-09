@@ -3,8 +3,8 @@
 ## Data flow
 
 ```
-jobs.ac.uk /search/<category> (6 categories)
-        │   scraper/fetcher.py  — parallel, paginated, incremental download (ThreadPoolExecutor)
+jobs.ac.uk /search/?academicDisciplineFacet[]=<slug> (21 subject disciplines)
+        │   scraper/fetcher.py  — one discipline at a time, paginated, incremental
         ▼
    search-result HTML pages
         │   scraper/parser.py   — parse_listing_html / parse_listing_card / parse_salary
@@ -21,7 +21,7 @@ jobs.ac.uk /search/<category> (6 categories)
 
 A scrape run is orchestrated by `scraper/run.py`:
 
-- `run_once()` — fetch all categories, parse, `bulk_upsert`, and `log_run` into `scrape_runs`.
+- `run_once()` — fetch all disciplines, parse, `bulk_upsert`, and `log_run` into `scrape_runs`.
 - `run_daemon()` — run once, then `schedule` a daily repeat at `config.SCHEDULE_TIME`.
   (In production a **cron job** is used instead of daemon mode — see below.)
 
@@ -29,8 +29,8 @@ A scrape run is orchestrated by `scraper/run.py`:
 
 | Layer | Module | Responsibility |
 |-------|--------|----------------|
-| Config | `config.py` | Search URLs, pagination/politeness, category labels, schedule time, alert thresholds, HTTP headers, DB path |
-| Scrape | `scraper/fetcher.py` | Download all categories in parallel; paginate per category, stopping early on already-seen jobs |
+| Config | `config.py` | Discipline list + facet, pagination/politeness, category labels, schedule time, alert thresholds, HTTP headers, DB path |
+| Scrape | `scraper/fetcher.py` | Fetch each discipline via the `academicDisciplineFacet[]` facet (sequential, stateless URLs); paginate per discipline, stopping early on already-seen jobs |
 | Scrape | `scraper/parser.py` | Turn search-result cards into clean job dicts; normalise salary/dates; infer year on year-less listing dates |
 | Scrape | `scraper/run.py` | CLI entry point; one-shot and daemon orchestration |
 | Persist | `db/schema.py` | Connection (WAL), schema creation, idempotent `_migrate`, index creation |

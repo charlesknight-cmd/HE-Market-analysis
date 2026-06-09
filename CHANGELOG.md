@@ -6,6 +6,19 @@ All notable changes to this project are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Changed
+- **Category model rebuilt on subject disciplines.** jobs.ac.uk also dropped its
+  six job-type category routes (~June 2026): `/search/academic-or-research`,
+  `/search/technical`, … now all return the *same* unfiltered list. The live
+  taxonomy is 21 subject **disciplines** (Biological Sciences, Computer Sciences,
+  Engineering & Technology, …), filtered via the search facet
+  `academicDisciplineFacet[]=<slug>`. The scraper now fetches one discipline at a
+  time through that facet (`config.DISCIPLINES`), and the `category` column /
+  dashboard category dimension holds the discipline slug. The facet rides in
+  every request URL (including pagination), so requests are self-describing and
+  immune to jobs.ac.uk's per-IP search state — earlier attempts to page the
+  job-type slugs concurrently bled categories together. Pre-migration rows keep
+  their old job-type `category` and age out. `config.SEARCH_FEEDS` (job-type) →
+  `config.DISCIPLINES`; `CATEGORY_LABELS` now maps discipline slugs to names.
 - **Data source migrated from RSS to search-results HTML.** jobs.ac.uk retired
   its RSS feeds (~June 2026): the old `?format=rss` URLs now return HTTP 500 or
   an HTML page, so the daily scrape had been recording `0 jobs` since 2026-06-07.

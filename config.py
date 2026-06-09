@@ -2,21 +2,40 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "data" / "jobs.db"
 
-# jobs.ac.uk retired its RSS feeds (~June 2026 — the old ?format=rss URLs now
-# 500 or return HTML). We scrape the server-rendered search-results pages
-# instead; they carry MORE than the old feed did (location, closing date and
-# date placed are all in the listing). One entry per job-type category.
+# jobs.ac.uk retired its RSS feeds AND its old job-type category routes (~June
+# 2026): the old ?format=rss URLs now 500/return HTML, and the six job-type
+# slugs (/search/academic-or-research, …) all resolve to the same unfiltered
+# list. The live taxonomy is now subject *disciplines*, filtered via the search
+# facet `academicDisciplineFacet[]=<slug>`. We scrape one discipline at a time;
+# the server-rendered cards carry title, employer, department, location, salary,
+# date placed and closing date. The `category` column now holds the discipline.
 SEARCH_BASE = "https://www.jobs.ac.uk/search"
-SEARCH_FEEDS = {
-    slug: f"{SEARCH_BASE}/{slug}"
-    for slug in (
-        "academic-or-research",
-        "professional-or-managerial",
-        "technical",
-        "clerical",
-        "further-education",
-        "craft-or-manual",
-    )
+DISCIPLINE_FACET = "academicDisciplineFacet[]"
+
+# The 21 subject disciplines jobs.ac.uk exposes (slug -> display name). A job may
+# appear under more than one; it is stored under whichever is scraped first.
+DISCIPLINES = {
+    "agriculture-food-and-veterinary":         "Agriculture, Food & Veterinary",
+    "architecture-building-and-planning":      "Architecture, Building & Planning",
+    "biological-sciences":                     "Biological Sciences",
+    "business-and-management-studies":         "Business & Management Studies",
+    "computer-sciences":                       "Computer Sciences",
+    "creative-arts-and-design":                "Creative Arts & Design",
+    "economics":                               "Economics",
+    "education-studies-inc-tefl":              "Education Studies (inc. TEFL)",
+    "engineering-and-technology":              "Engineering & Technology",
+    "health-and-medical":                      "Health & Medical",
+    "historical-and-philosophical-studies":    "Historical & Philosophical Studies",
+    "information-management-and-librarianship": "Information Management & Librarianship",
+    "languages-literature-and-culture":        "Languages, Literature & Culture",
+    "law":                                     "Law",
+    "mathematics-and-statistics":              "Mathematics & Statistics",
+    "media-and-communications":                "Media & Communications",
+    "physical-and-environmental-sciences":     "Physical & Environmental Sciences",
+    "politics-and-government":                 "Politics & Government",
+    "psychology":                              "Psychology",
+    "social-sciences-and-social-care":         "Social Sciences & Social Care",
+    "sport-and-leisure":                       "Sport & Leisure",
 }
 
 # Pagination + politeness. jobs.ac.uk caps page size at 25 (larger values are
@@ -25,17 +44,10 @@ SEARCH_FEEDS = {
 # already knows; MAX_PAGES_PER_CATEGORY only bounds the first post-outage catch-up.
 PAGE_SIZE = 25
 MAX_PAGES_PER_CATEGORY = 60
-PAGE_DELAY = 1.0  # seconds between page requests (per category)
+PAGE_DELAY = 1.0  # seconds between page requests (per discipline)
 
-# Friendly display names for each category
-CATEGORY_LABELS = {
-    "academic-or-research":       "Academic / Research",
-    "professional-or-managerial": "Professional / Managerial",
-    "technical":                  "Technical",
-    "clerical":                   "Clerical",
-    "further-education":          "Further Education",
-    "craft-or-manual":            "Craft / Manual",
-}
+# The dashboard/analysis "category" dimension is now the discipline.
+CATEGORY_LABELS = DISCIPLINES
 
 # Time of day to run the daily scheduled scrape (24 h HH:MM)
 SCHEDULE_TIME = "07:00"
