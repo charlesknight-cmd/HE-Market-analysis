@@ -21,14 +21,26 @@ def _uk_geojson() -> dict:
             _UK_GEOJSON = json.load(f)
     return _UK_GEOJSON
 
+# jobs.ac.uk now categorises by subject discipline (21 of them) rather than the
+# old six job-types, so we need a palette big enough to keep them distinguishable.
+# Build a stable slug→colour map across the live disciplines plus the legacy
+# job-type slugs that linger on pre-migration rows. Light24+Dark24 = 48 distinct
+# hues, comfortably more than we need.
+_OTHER = "__other__"  # bucket for the long tail in top-N charts
+_LEGACY_SLUGS = [
+    "academic-or-research", "professional-or-managerial", "technical",
+    "clerical", "further-education", "craft-or-manual",
+]
+_QUALITATIVE = px.colors.qualitative.Light24 + px.colors.qualitative.Dark24
 _PALETTE = {
-    "academic-or-research":       "#4361EE",
-    "professional-or-managerial": "#F77F00",
-    "technical":                  "#06A77D",
-    "clerical":                   "#E5383B",
-    "further-education":          "#7209B7",
-    "craft-or-manual":            "#8D6E63",
+    slug: _QUALITATIVE[i % len(_QUALITATIVE)]
+    for i, slug in enumerate(list(CATEGORY_LABELS.keys()) + _LEGACY_SLUGS)
 }
+_PALETTE[_OTHER] = "#9AA0A6"  # neutral grey for the folded "Other" bucket
+
+# How many categories to show individually before folding the rest into "Other"
+# / before trimming long-tail series on the busier multi-category charts.
+_TOP_N = 8
 
 # Shared accents used by single-series charts and positive/negative bars.
 _ACCENT = "#4361EE"
@@ -42,7 +54,30 @@ _FONT = "Outfit, -apple-system, sans-serif"
 _NO_DATA_MSG = "Not enough data yet — check back as the database fills up"
 
 def _label(slug: str) -> str:
+    if slug == _OTHER:
+        return "Other disciplines"
     return CATEGORY_LABELS.get(slug, slug)
+
+
+def _fold_categories(df: pd.DataFrame, value_col: str, cat_col: str = "category",
+                     n: int = _TOP_N) -> pd.DataFrame:
+    """Keep the `n` largest categories by total `value_col`; relabel the rest as
+    `_OTHER`. Keeps the busy multi-category charts legible now that there are 21
+    disciplines instead of six job-types. Caller re-aggregates as needed.
+    """
+    totals = df.groupby(cat_col)[value_col].sum().sort_values(ascending=False)
+    if len(totals) <= n:
+        return df
+    keep = set(totals.head(n).index)
+    out = df.copy()
+    out[cat_col] = out[cat_col].where(out[cat_col].isin(keep), _OTHER)
+    return out
+
+
+def _ordered_categories(cats) -> list[str]:
+    """Stable category order with the 'Other' bucket always last."""
+    cats = list(cats)
+    return [c for c in cats if c != _OTHER] + ([_OTHER] if _OTHER in cats else [])
 
 def _style_fig(fig: go.Figure) -> go.Figure:
     """Applies a cohesive light theme, large readable type, and polished hover."""
@@ -125,32 +160,37 @@ def daily_jobs_line(rows: list[dict]) -> go.Figure:
 
 
 def category_weekly_bar(rows: list[dict]) -> go.Figure:
-    """Stacked bar: weekly postings per category."""
+    """Stacked bar: weekly postings per discipline (top disciplines + Other)."""
     if not rows:
         return _empty()
     df = pd.DataFrame(rows)
+    df = _fold_categories(df, "job_count")
+    df = df.groupby(["week", "category"], as_index=False)["job_count"].sum()
     fig = px.bar(
         df, x="week", y="job_count", color="category",
         color_discrete_map=_PALETTE,
-        labels={"week": "ISO week", "job_count": "Jobs", "category": "Category"},
-        title="Weekly postings by category",
+        category_orders={"category": _ordered_categories(df["category"].unique())},
+        labels={"week": "ISO week", "job_count": "Jobs", "category": "Discipline"},
+        title="Weekly postings by discipline",
         barmode="stack",
     )
     for trace in fig.data:
         trace.name = _label(trace.name)
-    fig.update_layout(legend_title_text="Category", hovermode="x unified")
+    fig.update_layout(legend_title_text="Discipline", hovermode="x unified")
     return _style_fig(fig)
 
 
 # ── Trends charts ─────────────────────────────────────────────────────────────
 
 def category_share_area(rows: list[dict]) -> go.Figure:
-    """Stacked area: category share (%) of total postings per week."""
+    """Stacked area: discipline share (%) of postings per week (top + Other)."""
     if not rows:
         return _empty()
     df = pd.DataFrame(rows)
+    df = _fold_categories(df, "share_pct")
+    df = df.groupby(["week", "category"], as_index=False)["share_pct"].sum()
     fig = go.Figure()
-    for cat in df["category"].unique():
+    for cat in _ordered_categories(df["category"].unique()):
         cat_df = df[df["category"] == cat].sort_values("week")
         fig.add_trace(go.Scatter(
             x=cat_df["week"], y=cat_df["share_pct"],
@@ -161,32 +201,35 @@ def category_share_area(rows: list[dict]) -> go.Figure:
             hovertemplate=f"{_label(cat)}: %{{y:.1f}}%<extra></extra>",
         ))
     fig.update_layout(
-        title="Category share of postings over time (%)",
+        title="Discipline share of postings over time (%)",
         xaxis_title="ISO week", yaxis_title="Share (%)",
         yaxis=dict(range=[0, 100]),
         hovermode="x unified",
-        legend_title_text="Category",
+        legend_title_text="Discipline",
     )
     return _style_fig(fig)
 
 
 def seasonal_bar(rows: list[dict]) -> go.Figure:
-    """Grouped bar: postings per month per category — reveals seasonal patterns."""
+    """Stacked bar: postings per month per discipline (top + Other)."""
     if not rows:
         return _empty()
     df = pd.DataFrame(rows)
+    df = _fold_categories(df, "job_count")
+    df = df.groupby(["month", "category"], as_index=False)["job_count"].sum()
     fig = px.bar(
         df, x="month", y="job_count", color="category",
         color_discrete_map=_PALETTE,
-        labels={"month": "Month", "job_count": "Jobs", "category": "Category"},
-        title="Monthly postings by category",
+        category_orders={"category": _ordered_categories(df["category"].unique())},
+        labels={"month": "Month", "job_count": "Jobs", "category": "Discipline"},
+        title="Monthly postings by discipline",
         barmode="stack",
         text_auto=False,
     )
     for trace in fig.data:
         trace.name = _label(trace.name)
     fig.update_layout(
-        legend_title_text="Category",
+        legend_title_text="Discipline",
         hovermode="x unified",
         xaxis=dict(tickangle=-45),
     )
@@ -194,10 +237,18 @@ def seasonal_bar(rows: list[dict]) -> go.Figure:
 
 
 def salary_inflation_line(rows: list[dict]) -> go.Figure:
-    """Multi-line chart: average salary floor per category per month."""
+    """Multi-line chart: average salary floor per discipline per month.
+
+    Averaging the long tail would be misleading, so rather than fold into an
+    "Other" line we show only the best-represented disciplines (most months of
+    data) — keeping the chart readable with 21 disciplines in play.
+    """
     if not rows:
         return _empty()
     df = pd.DataFrame(rows)
+    top = df.groupby("category").size().sort_values(ascending=False).head(_TOP_N).index
+    df = df[df["category"].isin(top)]
+    trimmed = df["category"].nunique() < pd.DataFrame(rows)["category"].nunique()
     fig = go.Figure()
     for cat in df["category"].unique():
         cat_df = df[df["category"] == cat].sort_values("month")
@@ -208,12 +259,15 @@ def salary_inflation_line(rows: list[dict]) -> go.Figure:
             line=dict(color=_PALETTE.get(cat, "#888"), width=2),
             hovertemplate=f"{_label(cat)}: £%{{y:,.0f}}<extra></extra>",
         ))
+    title = "Average salary floor by discipline over time"
+    if trimmed:
+        title += f" (top {_TOP_N})"
     fig.update_layout(
-        title="Average salary floor by category over time",
+        title=title,
         xaxis_title="Month", yaxis_title="Avg salary floor (£)",
         yaxis=dict(tickprefix="£", tickformat=","),
         hovermode="x unified",
-        legend_title_text="Category",
+        legend_title_text="Discipline",
     )
     return _style_fig(fig)
 
@@ -355,7 +409,7 @@ def longevity_histogram(rows: list[dict]) -> go.Figure:
         hovertemplate="Visible %{x} day(s): %{y} jobs<extra></extra>",
     ))
     fig.update_layout(
-        title="How long jobs stay visible in the RSS feed",
+        title="How long jobs stay visible in the listings",
         xaxis_title="Days visible",
         yaxis_title="Number of jobs",
         bargap=0.1,
@@ -822,14 +876,18 @@ def salary_by_contract_bar(rows: list[dict]) -> go.Figure:
 
 
 def region_category_heatmap(rows: list[dict]) -> go.Figure:
-    """Heatmap: posting counts across region (y) × category (x)."""
+    """Heatmap: posting counts across discipline (y) × region (x).
+
+    Disciplines run down the y-axis (21 of them) against the handful of regions
+    on the x-axis — far more legible than the reverse now there are 21 disciplines.
+    """
     if not rows:
         return _empty(_NO_GEO_MSG)
     df = pd.DataFrame(rows)
     df["cat"] = df["category"].map(_label)
-    pivot = df.pivot_table(index="region", columns="cat",
+    pivot = df.pivot_table(index="cat", columns="region",
                            values="job_count", aggfunc="sum", fill_value=0)
-    # Order regions by total volume so the busiest sit at the top.
+    # Order disciplines by total volume so the busiest sit at the top.
     pivot = pivot.loc[pivot.sum(axis=1).sort_values().index]
     fig = go.Figure(go.Heatmap(
         z=pivot.values, x=list(pivot.columns), y=list(pivot.index),
@@ -838,7 +896,7 @@ def region_category_heatmap(rows: list[dict]) -> go.Figure:
         colorbar_title="Jobs",
     ))
     fig.update_layout(
-        title="Where job types concentrate (region × category)",
+        title="Where disciplines concentrate (discipline × region)",
         xaxis_title="", yaxis_title="",
         xaxis=dict(tickangle=-30),
     )

@@ -129,6 +129,17 @@ with _head_right:
         lookback_days = st.slider("Lookback window (days)", 7, 180, 30, step=7)
         st.caption("Charts cache for 5 minutes")
 
+# Site-change note for users (June 2026 source/taxonomy migration).
+with st.expander("ℹ️ Update — June 2026: how jobs are categorised has changed", expanded=False):
+    st.markdown(
+        "jobs.ac.uk changed how it publishes listings, so this tool now collects "
+        "data directly from their search results and groups roles by **subject "
+        "discipline** (e.g. Computer Sciences, Health & Medical, Engineering & "
+        "Technology) rather than the previous job-type categories. Coverage and "
+        "salary/location data are unchanged or improved. A small number of older "
+        "listings may still show the previous categories until they expire."
+    )
+
 # Inject premium visual custom CSS styles
 st.markdown("""
     <style>

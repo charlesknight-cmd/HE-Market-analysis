@@ -6,6 +6,15 @@ All notable changes to this project are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Changed
+- **Dashboard tuned for the 21-discipline taxonomy.** Replaced the 6-colour
+  job-type palette with a 48-hue qualitative map keyed across all disciplines
+  (+ legacy slugs), so category charts are no longer all-grey. The busy
+  multi-category charts now fold the long tail into an "Other disciplines"
+  bucket beyond the top 8 (weekly/monthly stacked bars, share-over-time area);
+  the salary-by-discipline line chart shows only the best-represented
+  disciplines; the region × category heatmap is transposed (disciplines down the
+  y-axis, regions across) for legibility. Added a dismissible "Update — June 2026"
+  note on the dashboard explaining the source/taxonomy change to users.
 - **Category model rebuilt on subject disciplines.** jobs.ac.uk also dropped its
   six job-type category routes (~June 2026): `/search/academic-or-research`,
   `/search/technical`, … now all return the *same* unfiltered list. The live
