@@ -8,9 +8,23 @@ from config import (
     PAGE_DELAY,
     PAGE_SIZE,
     REQUEST_HEADERS,
+    SEARCH_BASE,
     SEARCH_FEEDS,
 )
 from scraper.parser import parse_listing_html
+
+
+def _page_url(base_url: str, start_index: int, page_size: int) -> str:
+    """Build the URL for a results page.
+
+    Page 1 uses the pretty `/search/<category>` path, which sets the category in
+    the server-side session. Later pages must hit the bare `/search/?startIndex=`
+    endpoint (the category is no longer in the path) and rely on the session
+    cookie — carried by the shared requests.Session — to stay in the category.
+    """
+    if start_index <= 1:
+        return f"{base_url}?sortOrder=1&pageSize={page_size}&startIndex=1"
+    return f"{SEARCH_BASE}/?sortOrder=1&pageSize={page_size}&startIndex={start_index}"
 
 
 def fetch_category(
@@ -36,7 +50,7 @@ def fetch_category(
 
     try:
         for _ in range(max_pages):
-            url = f"{base_url}?pageSize={page_size}&startIndex={start_index}"
+            url = _page_url(base_url, start_index, page_size)
             resp = sess.get(url, headers=REQUEST_HEADERS, timeout=30)
             resp.raise_for_status()
 

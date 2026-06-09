@@ -15,13 +15,17 @@ All notable changes to this project are recorded here. Format loosely follows
   `closing_date`, and `date_posted` are parsed straight from each result card
   (year inferred for the year-less listing dates), so they no longer depend on
   detail-page enrichment — only `contract_type`, `hours`, and `region` still do.
-  Pagination steps `startIndex` by 25 (the site's max page size); listings are
-  date-sorted so the daily run stops once it reaches already-seen jobs, bounded
-  by `config.MAX_PAGES_PER_CATEGORY` for the first catch-up. `config.RSS_FEEDS`
-  → `config.SEARCH_FEEDS`; `bulk_upsert` now persists/gap-fills location, region,
-  date_posted and salary; new `existing_job_ids` query feeds the incremental stop.
-  Parser tests rewritten for the HTML cards; `feedparser` dropped from
-  requirements, `beautifulsoup4` added.
+  Pagination is session-based: page 1 hits `/search/<category>` (which stores the
+  category in the server-side session), and later pages hit `/search/?startIndex=N`
+  (no category in the path) on the same `requests.Session`, relying on the session
+  cookie — `startIndex` is ignored on the pretty category path. Page size is 25
+  (the site's max). Listings are date-sorted so the daily run stops once it reaches
+  already-seen jobs; `scraper.run --full` disables that early-stop and pages to
+  `config.MAX_PAGES_PER_CATEGORY` for the one-off post-outage catch-up.
+  `config.RSS_FEEDS` → `config.SEARCH_FEEDS`; `bulk_upsert` now persists/gap-fills
+  location, region, date_posted and salary; new `existing_job_ids` query feeds the
+  incremental stop. Parser/fetcher tests cover the HTML cards and URL scheme;
+  `feedparser` dropped from requirements, `beautifulsoup4` added.
 
 ### Added
 - **Detail-page enrichment pipeline.** `scraper/detail.py` fetches each job's

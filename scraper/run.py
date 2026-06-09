@@ -22,13 +22,16 @@ from scraper.detail import run_enrichment
 ENRICH_LIMIT = 200
 
 
-def run_once(enrich: bool = True) -> None:
+def run_once(enrich: bool = True, full: bool = False) -> None:
     started = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    print(f"\n[{started}] Starting scrape...")
+    print(f"\n[{started}] Starting scrape{' (full)' if full else ''}...")
 
     # Listings are newest-first, so passing the IDs we already hold lets each
-    # category stop paging as soon as it reaches jobs we've seen before.
-    results = fetch_all(known_ids=existing_job_ids())
+    # category stop paging as soon as it reaches jobs we've seen before. `full`
+    # disables that early-stop and pages to MAX_PAGES_PER_CATEGORY — used for the
+    # initial backfill / catch-up, where the DB isn't yet contiguous from the top.
+    known = None if full else existing_job_ids()
+    results = fetch_all(known_ids=known)
 
     total_new = total_updated = total_found = 0
     for slug, (jobs, error) in results.items():
@@ -78,6 +81,12 @@ def main() -> None:
         action="store_true",
         help="Skip the detail-page enrichment step (listing scrape + upsert only)",
     )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Page every category to MAX_PAGES_PER_CATEGORY instead of stopping at "
+             "already-seen jobs (one-off backfill / catch-up)",
+    )
     args = parser.parse_args()
 
     init_db()
@@ -85,7 +94,7 @@ def main() -> None:
     if args.daemon:
         run_daemon()
     else:
-        run_once(enrich=not args.no_enrich)
+        run_once(enrich=not args.no_enrich, full=args.full)
 
 
 if __name__ == "__main__":
