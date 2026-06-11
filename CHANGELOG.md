@@ -14,6 +14,12 @@ All notable changes to this project are recorded here. Format loosely follows
   parse time. Nations with no postings are padded to zero so they
   still appear as a light shade.
 
+### Changed
+- **UK GeoJSON cache keys on file mtime.** `_uk_geojson()` now reloads
+  the boundary file when its modification time changes instead of holding
+  the first-loaded copy for the life of the process, so an edit to the
+  geojson is picked up on the next render rather than after a restart.
+
 ### Added
 - **Chart smoke-test script** (`scripts/chart_smoke_test.py`): exercises
   every chart builder against the live database and reports which return

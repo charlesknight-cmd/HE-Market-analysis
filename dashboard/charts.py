@@ -11,6 +11,7 @@ from config import CATEGORY_LABELS
 _UK_NATIONS = ["England", "Scotland", "Wales", "Northern Ireland"]
 _GEOJSON_PATH = Path(__file__).parent / "assets" / "uk_nations.geojson"
 _UK_GEOJSON = None
+_UK_GEOJSON_MTIME = None
 
 
 def _ring_signed_area(ring: list) -> float:
@@ -45,11 +46,17 @@ def _rewind_for_plotly(gj: dict) -> dict:
 
 
 def _uk_geojson() -> dict:
-    """Lazily load and cache the bundled UK-nations boundary GeoJSON."""
-    global _UK_GEOJSON
-    if _UK_GEOJSON is None:
+    """Load and cache the bundled UK-nations boundary GeoJSON.
+
+    Cache is keyed on the file's mtime so an edit to the geojson is picked up
+    on the next call rather than serving a stale copy until the process restarts.
+    """
+    global _UK_GEOJSON, _UK_GEOJSON_MTIME
+    mtime = _GEOJSON_PATH.stat().st_mtime
+    if _UK_GEOJSON is None or mtime != _UK_GEOJSON_MTIME:
         with open(_GEOJSON_PATH, encoding="utf-8") as f:
             _UK_GEOJSON = _rewind_for_plotly(json.load(f))
+        _UK_GEOJSON_MTIME = mtime
     return _UK_GEOJSON
 
 # jobs.ac.uk now categorises by subject discipline (21 of them) rather than the

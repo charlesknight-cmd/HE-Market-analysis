@@ -1,6 +1,8 @@
 """Regression tests for the dashboard chart builders (geo map in particular)."""
 
+import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -48,3 +50,16 @@ def test_choropleth_placeholder_when_no_uk_rows():
     fig = region_choropleth([{"region": "International", "job_count": 5}])
     assert len(fig.data) == 0
     assert any("location data" in (a.text or "") for a in fig.layout.annotations)
+
+
+def test_uk_geojson_cache_reuses_until_file_changes():
+    """Cache is keyed on mtime: unchanged file → same object; edit → reload."""
+    first = _uk_geojson()
+    assert _uk_geojson() is first, "unchanged file should reuse the cached object"
+
+    original = charts._GEOJSON_PATH.stat().st_mtime
+    try:
+        os.utime(charts._GEOJSON_PATH, (original + 5, original + 5))
+        assert _uk_geojson() is not first, "mtime change should trigger a reload"
+    finally:
+        os.utime(charts._GEOJSON_PATH, (original, original))
