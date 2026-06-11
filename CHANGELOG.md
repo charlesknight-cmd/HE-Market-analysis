@@ -5,6 +5,23 @@ All notable changes to this project are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+- **UK choropleth map now renders correctly.** Plotly's geo renderer
+  (d3-geo) requires exterior polygon rings wound clockwise, while the
+  bundled `uk_nations.geojson` followed the RFC 7946 counterclockwise
+  convention. This caused each nation to render as "the globe minus the
+  shape", producing a near-blank map. The loader now rewinds rings at
+  parse time. Nations with no postings are padded to zero so they
+  still appear as a light shade.
+
+### Added
+- **Chart smoke-test script** (`scripts/chart_smoke_test.py`): exercises
+  every chart builder against the live database and reports which return
+  placeholder "no data" figures vs real traces. Safe to run anytime.
+- **Chart regression tests** (`tests/test_charts.py`): covers the GeoJSON
+  winding-order fix, zero-padding of missing nations, and the fallback
+  placeholder for a fully International-only result set.
+
 ### Added
 - **Database backup script + nightly cron.** `scripts/backup_db.py` takes a
   consistent, gzipped snapshot of `data/jobs.db` via SQLite's online backup API

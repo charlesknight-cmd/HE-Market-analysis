@@ -183,10 +183,10 @@ def title_word_frequency(days: int = 90, top_n: int = 30) -> list[dict]:
 
 
 def job_longevity_distribution() -> list[dict]:
-    """Distribution of how many days jobs remain visible in the RSS feed.
+    """Distribution of how many days jobs remain visible in the search listings.
 
     'days_visible' = last_seen - first_seen. Zero means seen only once.
-    Note: this measures time in the RSS feed top-20, not actual close date.
+    Note: this measures time visible in the listings, not actual close date.
     """
     with get_connection() as conn:
         rows = conn.execute(

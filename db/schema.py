@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     closing_date  TEXT,                      -- YYYY-MM-DD
     contract_type TEXT,                      -- 'permanent' | 'fixed-term'
     hours         TEXT,                      -- 'full-time' | 'part-time' | 'flexible'
-    category      TEXT,                      -- RSS feed category slug
+    category      TEXT,                      -- subject-discipline slug (see config.DISCIPLINES)
     url           TEXT    NOT NULL,
     first_seen    TEXT    NOT NULL,          -- ISO-8601 datetime (UTC)
     last_seen     TEXT    NOT NULL           -- ISO-8601 datetime (UTC)

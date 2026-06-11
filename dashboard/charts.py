@@ -13,12 +13,43 @@ _GEOJSON_PATH = Path(__file__).parent / "assets" / "uk_nations.geojson"
 _UK_GEOJSON = None
 
 
+def _ring_signed_area(ring: list) -> float:
+    """Planar shoelace area in lon/lat; positive = counterclockwise."""
+    s = 0.0
+    for i in range(len(ring) - 1):
+        x1, y1 = ring[i][0], ring[i][1]
+        x2, y2 = ring[i + 1][0], ring[i + 1][1]
+        s += x1 * y2 - x2 * y1
+    return s / 2
+
+
+def _rewind_for_plotly(gj: dict) -> dict:
+    """Rewind polygon rings to the winding Plotly's geo renderer expects.
+
+    Plotly geo traces render on a sphere (d3-geo), where exterior rings must be
+    wound clockwise — the *opposite* of the RFC 7946 GeoJSON convention most
+    boundary files ship with. A wrong-wound ring is treated as enclosing the
+    whole globe minus the shape, which blanks the map.
+    """
+    for feat in gj.get("features", []):
+        geom = feat.get("geometry", {})
+        if geom.get("type") != "MultiPolygon":
+            continue
+        for polygon in geom["coordinates"]:
+            for i, ring in enumerate(polygon):
+                ccw = _ring_signed_area(ring) > 0
+                want_ccw = i > 0  # exterior CW, holes CCW
+                if ccw != want_ccw:
+                    ring.reverse()
+    return gj
+
+
 def _uk_geojson() -> dict:
     """Lazily load and cache the bundled UK-nations boundary GeoJSON."""
     global _UK_GEOJSON
     if _UK_GEOJSON is None:
         with open(_GEOJSON_PATH, encoding="utf-8") as f:
-            _UK_GEOJSON = json.load(f)
+            _UK_GEOJSON = _rewind_for_plotly(json.load(f))
     return _UK_GEOJSON
 
 # jobs.ac.uk now categorises by subject discipline (21 of them) rather than the
@@ -396,7 +427,7 @@ def institution_salary_scatter(rows: list[dict]) -> go.Figure:
 
 
 def longevity_histogram(rows: list[dict]) -> go.Figure:
-    """Bar chart: distribution of how many days jobs stay visible in the feed."""
+    """Bar chart: distribution of how many days jobs stay visible in the listings."""
     if not rows:
         return _empty()
     df = pd.DataFrame(rows)
@@ -911,6 +942,11 @@ def region_choropleth(rows: list[dict]) -> go.Figure:
     df = df[df["region"].isin(_UK_NATIONS)]
     if df.empty:
         return _empty("No UK-nation location data yet")
+    # Pad nations with no postings to zero so they still draw on the map
+    # instead of leaving a hole in the UK outline.
+    df = (df.set_index("region")["job_count"]
+            .reindex(_UK_NATIONS, fill_value=0)
+            .rename_axis("region").reset_index())
     fig = go.Figure(go.Choropleth(
         geojson=_uk_geojson(),
         locations=df["region"],

@@ -549,8 +549,8 @@ with t_institutions:
             st.plotly_chart(longevity_histogram(_longevity()), width='stretch', key="longevity")
             st.caption(
                 "Days visible = gap between first and last time a job appeared in "
-                "the RSS feed. Zero means seen in one scrape only. This is a proxy "
-                "for listing duration, not exact close date."
+                "the search listings. Zero means seen in one scrape only. This is "
+                "a proxy for listing duration, not exact close date."
             )
 
 # ═══════════════════════════════════════════════════════════════════════════════
