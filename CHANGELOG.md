@@ -6,13 +6,23 @@ All notable changes to this project are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Fixed
-- **UK choropleth map now renders correctly.** Plotly's geo renderer
-  (d3-geo) requires exterior polygon rings wound clockwise, while the
-  bundled `uk_nations.geojson` followed the RFC 7946 counterclockwise
-  convention. This caused each nation to render as "the globe minus the
-  shape", producing a near-blank map. The loader now rewinds rings at
-  parse time. Nations with no postings are padded to zero so they
-  still appear as a light shade.
+- **UK choropleth map no longer renders as a blank square.** The map now uses
+  Plotly's MapLibre `choroplethmap` trace (flat Web-Mercator) rather than the geo
+  `choropleth` trace (spherical d3-geo). The geo trace's fill depends on polygon
+  ring winding order, and which winding it wants differs across Plotly.js
+  versions — so the earlier rewind, tuned for one version, still inverted the
+  polygons (filling the whole frame = blank) under the Plotly.js that Streamlit
+  actually bundles. MapLibre projects on a plane and is indifferent to winding,
+  so the map renders reliably regardless of the bundled Plotly.js version.
+  Centre/zoom are fitted to the geojson bounding box (clamped so the Shetland
+  Isles don't shrink the mainland to a speck); nations with no postings are
+  padded to zero and outlined in grey so they still show.
+- **Institution "pay vs hiring volume" scatter is readable again.** Previously
+  every institution carried an always-on text label, which overlapped into an
+  illegible smear, names were clipped at the edges, and bubble size merely
+  duplicated the y-axis. Now all institutions are plotted with uniform markers
+  and full hover detail, only a few standouts (biggest recruiters, highest/lowest
+  payers) are labelled directly, and labels are placed away from the nearest edge.
 
 ### Changed
 - **UK GeoJSON cache keys on file mtime.** `_uk_geojson()` now reloads
@@ -24,9 +34,10 @@ All notable changes to this project are recorded here. Format loosely follows
 - **Chart smoke-test script** (`scripts/chart_smoke_test.py`): exercises
   every chart builder against the live database and reports which return
   placeholder "no data" figures vs real traces. Safe to run anytime.
-- **Chart regression tests** (`tests/test_charts.py`): covers the GeoJSON
-  winding-order fix, zero-padding of missing nations, and the fallback
-  placeholder for a fully International-only result set.
+- **Chart regression tests** (`tests/test_charts.py`): assert the map uses the
+  winding-insensitive MapLibre trace, the fitted view sits over the UK,
+  zero-padding of missing nations, the International-only placeholder, and that
+  the institution scatter labels only a subset of its points.
 
 ### Added
 - **Database backup script + nightly cron.** `scripts/backup_db.py` takes a

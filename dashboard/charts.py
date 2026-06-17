@@ -1,6 +1,7 @@
 """Reusable Plotly figure builders."""
 
 import json
+import math
 from pathlib import Path
 
 import plotly.express as px
@@ -14,39 +15,15 @@ _UK_GEOJSON = None
 _UK_GEOJSON_MTIME = None
 
 
-def _ring_signed_area(ring: list) -> float:
-    """Planar shoelace area in lon/lat; positive = counterclockwise."""
-    s = 0.0
-    for i in range(len(ring) - 1):
-        x1, y1 = ring[i][0], ring[i][1]
-        x2, y2 = ring[i + 1][0], ring[i + 1][1]
-        s += x1 * y2 - x2 * y1
-    return s / 2
-
-
-def _rewind_for_plotly(gj: dict) -> dict:
-    """Rewind polygon rings to the winding Plotly's geo renderer expects.
-
-    Plotly geo traces render on a sphere (d3-geo), where exterior rings must be
-    wound clockwise — the *opposite* of the RFC 7946 GeoJSON convention most
-    boundary files ship with. A wrong-wound ring is treated as enclosing the
-    whole globe minus the shape, which blanks the map.
-    """
-    for feat in gj.get("features", []):
-        geom = feat.get("geometry", {})
-        if geom.get("type") != "MultiPolygon":
-            continue
-        for polygon in geom["coordinates"]:
-            for i, ring in enumerate(polygon):
-                ccw = _ring_signed_area(ring) > 0
-                want_ccw = i > 0  # exterior CW, holes CCW
-                if ccw != want_ccw:
-                    ring.reverse()
-    return gj
-
-
 def _uk_geojson() -> dict:
     """Load and cache the bundled UK-nations boundary GeoJSON.
+
+    The map is drawn with a MapLibre `choroplethmap` trace, which projects the
+    polygons on a flat Web-Mercator plane and is therefore indifferent to ring
+    winding order — so we serve the file exactly as shipped (no rewinding). This
+    is the deliberate cure for the recurring "blank square": Plotly's older geo
+    `choropleth` trace renders on a sphere and silently inverts wrong-wound
+    rings to fill the whole frame; the MapLibre trace cannot.
 
     Cache is keyed on the file's mtime so an edit to the geojson is picked up
     on the next call rather than serving a stale copy until the process restarts.
@@ -55,9 +32,56 @@ def _uk_geojson() -> dict:
     mtime = _GEOJSON_PATH.stat().st_mtime
     if _UK_GEOJSON is None or mtime != _UK_GEOJSON_MTIME:
         with open(_GEOJSON_PATH, encoding="utf-8") as f:
-            _UK_GEOJSON = _rewind_for_plotly(json.load(f))
+            _UK_GEOJSON = json.load(f)
         _UK_GEOJSON_MTIME = mtime
     return _UK_GEOJSON
+
+
+def _uk_map_view(gj: dict, width: int = 600, height: int = 520,
+                 pad: float = 1.1) -> tuple[dict, float]:
+    """Centre + zoom that frame the UK nations for a MapLibre `map` trace.
+
+    Derived from the geojson's bounding box (so it self-adjusts if the boundary
+    file is ever swapped) using the standard Web-Mercator fit: choose the zoom
+    that makes the bbox fill a reference viewport, binding on whichever axis is
+    tighter. The map re-centres responsively to its container but keeps this zoom.
+    """
+    lons: list[float] = []
+    lats: list[float] = []
+    for feat in gj.get("features", []):
+        geom = feat.get("geometry", {})
+        polys = geom.get("coordinates", [])
+        if geom.get("type") == "Polygon":
+            polys = [polys]
+        for poly in polys:
+            for ring in poly:
+                for lon, lat in ring:
+                    lons.append(lon)
+                    lats.append(lat)
+    if not lons:
+        return {"lat": 55.0, "lon": -3.5}, 4.0
+
+    # Clamp the northern extent: the Shetland Isles (~60.9°N) sit far offshore
+    # above largely empty ocean, and fitting them shrinks the main landmass to a
+    # speck. Cap the fit at 59.5°N so Shetland rests just past the top edge while
+    # the mainland fills the frame. (This is a UK-nations map, so a fixed cap is
+    # appropriate rather than a general heuristic.)
+    min_lon, max_lon = min(lons), max(lons)
+    min_lat = min(lats)
+    max_lat = min(max(lats), 59.5)
+    center = {"lon": (min_lon + max_lon) / 2, "lat": (min_lat + max_lat) / 2}
+
+    def _merc(lat: float) -> float:
+        s = min(max(math.sin(math.radians(lat)), -0.9999), 0.9999)
+        return math.log((1 + s) / (1 - s)) / 2
+
+    world = 512.0  # MapLibre logical tile size
+    lat_frac = (_merc(max_lat) - _merc(min_lat)) / math.pi * pad
+    lon_frac = (max_lon - min_lon) / 360 * pad
+    lat_zoom = math.log2(height / world / lat_frac) if lat_frac > 0 else 4.0
+    lon_zoom = math.log2(width / world / lon_frac) if lon_frac > 0 else 4.0
+    zoom = max(0.0, min(lat_zoom, lon_zoom, 18.0))
+    return center, zoom
 
 # jobs.ac.uk now categorises by subject discipline (21 of them) rather than the
 # old six job-types, so we need a palette big enough to keep them distinguishable.
@@ -417,19 +441,69 @@ def top_institutions_bar(rows: list[dict], days: int) -> go.Figure:
 
 
 def institution_salary_scatter(rows: list[dict]) -> go.Figure:
-    """Scatter: avg salary vs job volume per institution."""
+    """Bubble chart: each institution placed by pay floor (x) and hiring volume (y).
+
+    Labelling every institution turned this into overlapping, unreadable text, so
+    only a few standouts are labelled directly — the biggest recruiters and the
+    best/worst payers — and the rest are identifiable on hover. Labels are placed
+    away from whichever edge they sit near so long names aren't clipped.
+    """
     if not rows:
         return _empty()
-    df = pd.DataFrame(rows)
-    fig = px.scatter(
-        df, x="avg_salary_min", y="job_count",
-        text="institution",
-        size="job_count",
-        labels={"avg_salary_min": "Avg salary floor (£)", "job_count": "Jobs posted"},
-        title="Institutions: salary floor vs posting volume",
+    df = pd.DataFrame(rows).dropna(subset=["avg_salary_min", "job_count"])
+    if df.empty:
+        return _empty()
+    df = df.sort_values("job_count", ascending=False)
+
+    xmin, xmax = df["avg_salary_min"].min(), df["avg_salary_min"].max()
+    xspan = (xmax - xmin) or 1
+    ymax = df["job_count"].max()
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df["avg_salary_min"], y=df["job_count"],
+        mode="markers",
+        marker=dict(size=13, color=_ACCENT, opacity=0.6,
+                    line=dict(width=1, color="white")),
+        customdata=df[["institution", "avg_salary_max"]].values,
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>"
+            "Salary floor: £%{x:,.0f}<br>"
+            "Salary ceiling: £%{customdata[1]:,.0f}<br>"
+            "Postings: %{y}<extra></extra>"
+        ),
+        showlegend=False,
+    ))
+
+    # Label only the notable few so the surviving labels are worth reading and
+    # don't collide: the biggest recruiters plus the highest/lowest payers.
+    notable = (set(df.nlargest(3, "job_count")["institution"])
+               | set(df.nlargest(2, "avg_salary_min")["institution"])
+               | set(df.nsmallest(1, "avg_salary_min")["institution"]))
+    lab = df[df["institution"].isin(notable)].copy()
+
+    def _pos(x: float) -> str:
+        if x >= xmax - 0.22 * xspan:
+            return "middle left"   # near right edge → text to the left
+        if x <= xmin + 0.22 * xspan:
+            return "middle right"  # near left edge → text to the right
+        return "top center"
+
+    fig.add_trace(go.Scatter(
+        x=lab["avg_salary_min"], y=lab["job_count"],
+        mode="text", text=lab["institution"],
+        textposition=[_pos(x) for x in lab["avg_salary_min"]],
+        textfont=dict(size=11, color=_INK),
+        hoverinfo="skip", showlegend=False,
+    ))
+
+    fig.update_layout(
+        title="Institutions: pay floor vs hiring volume",
+        xaxis=dict(title="Average salary floor", tickprefix="£", tickformat=",",
+                   range=[xmin - 0.12 * xspan, xmax + 0.12 * xspan]),
+        yaxis=dict(title="Postings in window", rangemode="tozero",
+                   range=[0, ymax * 1.2]),
     )
-    fig.update_traces(textposition="top center")
-    fig.update_layout(xaxis=dict(tickprefix="£", tickformat=","))
     return _style_fig(fig)
 
 
@@ -942,7 +1016,12 @@ def region_category_heatmap(rows: list[dict]) -> go.Figure:
 
 
 def region_choropleth(rows: list[dict]) -> go.Figure:
-    """Choropleth map: job postings shaded by UK nation."""
+    """Choropleth map: job postings shaded by UK nation.
+
+    Uses the MapLibre `choroplethmap` trace on a blank ("white-bg") basemap —
+    no tiles, no token, fully offline — which renders the polygons on a flat
+    projection that is immune to geojson winding order. See `_uk_geojson`.
+    """
     if not rows:
         return _empty(_NO_GEO_MSG)
     df = pd.DataFrame(rows)
@@ -954,20 +1033,26 @@ def region_choropleth(rows: list[dict]) -> go.Figure:
     df = (df.set_index("region")["job_count"]
             .reindex(_UK_NATIONS, fill_value=0)
             .rename_axis("region").reset_index())
-    fig = go.Figure(go.Choropleth(
-        geojson=_uk_geojson(),
+    gj = _uk_geojson()
+    center, zoom = _uk_map_view(gj)
+    fig = go.Figure(go.Choroplethmap(
+        geojson=gj,
         locations=df["region"],
         z=df["job_count"],
         featureidkey="properties.name",
         colorscale="Blues",
-        marker_line_color="white", marker_line_width=0.6,
+        zmin=0,
+        # A visible grey outline (not white) so nations with few/zero postings
+        # — which fill near-white on the pale end of Blues — still show their
+        # shape against the white basemap instead of vanishing.
+        marker_line_color="#6E7681", marker_line_width=1.0,
         colorbar_title="Jobs",
         hovertemplate="%{location}<br>%{z} jobs<extra></extra>",
     ))
-    fig.update_geos(fitbounds="locations", visible=False,
-                    projection_type="mercator", bgcolor="rgba(0,0,0,0)")
+    fig = _style_fig(fig)
     fig.update_layout(
         title="UK job postings by nation",
+        map=dict(style="white-bg", center=center, zoom=zoom),
         margin=dict(l=10, r=10, t=70, b=10),
     )
-    return _style_fig(fig)
+    return fig

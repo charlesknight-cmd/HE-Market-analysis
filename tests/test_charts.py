@@ -2,32 +2,35 @@
 
 import os
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dashboard import charts
-from dashboard.charts import _ring_signed_area, _uk_geojson, region_choropleth
+from dashboard.charts import _uk_geojson, _uk_map_view, region_choropleth
 
 
-def test_uk_geojson_winding_matches_plotly_convention():
-    """Plotly geo traces need exterior rings clockwise (d3-geo), not RFC 7946 CCW.
+def test_map_uses_winding_insensitive_trace():
+    """The map must use the MapLibre ``choroplethmap`` trace, not the geo
+    ``choropleth`` trace.
 
-    A wrong-wound ring renders as the whole globe minus the shape, which blanked
-    the UK map entirely (June 2026).
+    The geo trace renders on a sphere (d3-geo): a polygon wound the "wrong" way
+    for whatever Plotly.js version is in play inverts to fill the whole frame —
+    the recurring "blank square". MapLibre projects on a plane and is immune to
+    ring winding, so we lock the trace type in to stop a regression back to the
+    fragile, version-sensitive approach.
     """
-    gj = _uk_geojson()
-    assert gj["features"], "geojson should have features"
-    for feat in gj["features"]:
-        name = feat["properties"]["name"]
-        for polygon in feat["geometry"]["coordinates"]:
-            for i, ring in enumerate(polygon):
-                ccw = _ring_signed_area(ring) > 0
-                if i == 0:
-                    assert not ccw, f"{name}: exterior ring must be clockwise"
-                else:
-                    assert ccw, f"{name}: hole ring must be counterclockwise"
+    fig = region_choropleth([{"region": "England", "job_count": 5}])
+    assert fig.data[0].type == "choroplethmap"
+    assert fig.layout.map.style == "white-bg"
+
+
+def test_uk_map_view_frames_the_uk():
+    """Centre/zoom derived from the geojson should actually sit over the UK."""
+    center, zoom = _uk_map_view(_uk_geojson())
+    assert 50 <= center["lat"] <= 58, center
+    assert -6 <= center["lon"] <= -1, center
+    assert 2.5 <= zoom <= 5.5, zoom
 
 
 def test_choropleth_pads_missing_nations_to_zero():
@@ -63,3 +66,26 @@ def test_uk_geojson_cache_reuses_until_file_changes():
         assert _uk_geojson() is not first, "mtime change should trigger a reload"
     finally:
         os.utime(charts._GEOJSON_PATH, (original, original))
+
+
+def test_salary_scatter_labels_only_standouts():
+    """Regression: labelling every institution turned the scatter into an
+    unreadable smear. Now everyone is plotted and hoverable, but only a handful
+    of standouts carry a text label.
+    """
+    rows = [{"institution": f"Institution number {i}",
+             "job_count": (i % 5) + 1,
+             "avg_salary_min": 30000 + i * 700,
+             "avg_salary_max": 40000 + i * 700} for i in range(18)]
+    fig = charts.institution_salary_scatter(rows)
+    markers, labels = fig.data[0], fig.data[1]
+    assert markers.mode == "markers"
+    assert len(markers.x) == 18, "every institution should be plotted"
+    n_labels = len([t for t in labels.text if t])
+    assert 0 < n_labels < 18, "only some institutions should be labelled"
+    assert n_labels <= 8
+
+
+def test_salary_scatter_placeholder_when_empty():
+    fig = charts.institution_salary_scatter([])
+    assert len(fig.data) == 0
