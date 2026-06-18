@@ -24,6 +24,7 @@ _ensure_db()
 from analysis.alerts import check_all
 from analysis.institutions import (
     institution_category_breakdown,
+    institution_posting_distribution,
     institution_weekly_trend,
     new_vs_repeat_institutions,
     salary_by_institution,
@@ -58,6 +59,14 @@ from analysis.trends import (
     salary_by_region,
     salary_by_contract_type,
     region_category_matrix,
+    daily_postings_trend,
+    postings_by_weekday,
+    salary_disclosure_by_group,
+    intl_vs_uk_profile,
+    fixed_term_share_by_discipline,
+    application_window_by_discipline,
+    contract_hours_matrix,
+    deadline_urgency_buckets,
 )
 from config import CATEGORY_LABELS
 from dashboard.charts import (
@@ -92,6 +101,15 @@ from dashboard.charts import (
     salary_by_contract_bar,
     region_category_heatmap,
     region_choropleth,
+    posting_volume_line,
+    weekday_cadence_bar,
+    recruiter_concentration_curve,
+    salary_transparency_breakdown,
+    intl_vs_uk_profile_bars,
+    casualisation_by_discipline_bar,
+    application_window_by_discipline_bar,
+    precarity_matrix_heatmap,
+    deadline_pressure_bar,
 )
 from db.queries import get_all_jobs, last_scrape_time
 
@@ -289,6 +307,36 @@ def _salary_contract(d):    return salary_by_contract_type(days=max(d, 90))
 @st.cache_data(ttl=300)
 def _region_matrix(d):      return region_category_matrix(days=d)
 
+# New charts (2026-06): exploit the now ~3-month date_posted history + enriched
+# fields. Several floor their window (max(d, N)) so structural patterns still
+# render when the sidebar lookback is short.
+@st.cache_data(ttl=300)
+def _posting_volume(d):     return daily_postings_trend(days=d)
+
+@st.cache_data(ttl=300)
+def _weekday_cadence(d):    return postings_by_weekday(days=max(d, 120))
+
+@st.cache_data(ttl=300)
+def _inst_distribution(d):  return institution_posting_distribution(days=max(d, 120))
+
+@st.cache_data(ttl=300)
+def _salary_disclosure_groups(d): return salary_disclosure_by_group(days=max(d, 120))
+
+@st.cache_data(ttl=300)
+def _intl_vs_uk(d):         return intl_vs_uk_profile(days=max(d, 120))
+
+@st.cache_data(ttl=300)
+def _casualisation(d):      return fixed_term_share_by_discipline(days=max(d, 180), min_n=40)
+
+@st.cache_data(ttl=300)
+def _app_window_by_disc(d): return application_window_by_discipline(days=max(d, 90))
+
+@st.cache_data(ttl=300)
+def _contract_hours_matrix(d): return contract_hours_matrix(days=max(d, 90))
+
+@st.cache_data(ttl=300)
+def _deadline_pressure():   return deadline_urgency_buckets()
+
 weeks = max(1, lookback_days // 7)
 months = max(1, lookback_days // 30)
 
@@ -356,12 +404,19 @@ with t_trends:
     )
 
     with sub_volume:
+        st.plotly_chart(posting_volume_line(_posting_volume(max(lookback_days, 120))), width='stretch', key="posting_volume")
+        st.caption("Postings counted by their true publication date (date_posted) over the last ~3 months. The "
+                   "shaded left edge undercounts (short-window jobs may have closed before our first scrape); "
+                   "the last day or two is still provisional.")
         st.plotly_chart(category_share_area(_cat_share(weeks)), width='stretch', key="cat_share")
         col_v1, col_v2 = st.columns(2)
         with col_v1:
             st.plotly_chart(seasonal_heatmap(_seasonal_heatmap()), width='stretch', key="seasonal_heatmap")
         with col_v2:
             st.plotly_chart(seasonal_bar(_monthly(max(months, 3))), width='stretch', key="seasonal")
+        st.plotly_chart(weekday_cadence_bar(_weekday_cadence(lookback_days)), width='stretch', key="weekday_cadence")
+        st.caption("Which weekday new roles are published on (true posting date). Universities publish on "
+                   "working days, so weekends are effectively empty.")
 
     with sub_pay:
         col_p1, col_p2 = st.columns(2)
@@ -371,6 +426,9 @@ with t_trends:
             st.plotly_chart(salary_inflation_line(_salary_month(max(months, 3))), width='stretch', key="salary_inflation")
         st.plotly_chart(salary_transparency_line(_salary_transparency(weeks)), width='stretch', key="salary_transparency")
         st.caption("Share of new postings that don't state a parseable salary.")
+        st.plotly_chart(salary_transparency_breakdown(_salary_disclosure_groups(lookback_days)), width='stretch', key="salary_transparency_breakdown")
+        st.caption("Share of postings with no parseable salary, split by discipline and by region, against the "
+                   "overall baseline. International reads near 100% because its non-GBP pay never parses.")
 
     with sub_contract:
         st.caption("Contract type and hours come from detail-page enrichment — they populate as jobs are enriched.")
@@ -381,6 +439,12 @@ with t_trends:
             st.plotly_chart(permanent_ratio_line(_contract_trend(weeks)), width='stretch', key="permanent_ratio")
         with col_c3:
             st.plotly_chart(hours_bar(_hours_trend(weeks)), width='stretch', key="hours")
+        st.plotly_chart(casualisation_by_discipline_bar(_casualisation(lookback_days)), width='stretch', key="casualisation")
+        st.caption("Fixed-term share of contracted postings per discipline (last 180 days; disciplines with 40+ "
+                   "contracted roles). Bars right of the dashed baseline are more casualised than the market.")
+        st.plotly_chart(precarity_matrix_heatmap(_contract_hours_matrix(lookback_days)), width='stretch', key="precarity_matrix")
+        st.caption("Postings by contract-type × hours (share of the enriched subset). The outlined cell is the "
+                   "doubly-precarious fixed-term + part-time corner.")
 
     with sub_timing:
         col_t1, col_t2 = st.columns(2)
@@ -390,6 +454,13 @@ with t_trends:
             st.plotly_chart(application_window_hist(_app_window(lookback_days)), width='stretch', key="app_window")
         st.plotly_chart(upcoming_deadlines_bar(_deadlines()), width='stretch', key="deadlines")
         st.caption("Currently-open jobs grouped by the week their application deadline falls — the recruiting pipeline ahead.")
+        _dl_buckets = _deadline_pressure()
+        st.plotly_chart(deadline_pressure_bar(_dl_buckets), width='stretch', key="deadline_pressure")
+        _urgent_72h = next((b["job_count"] for b in _dl_buckets if b["bucket"] == "0-3"), 0)
+        st.caption(f"{_urgent_72h:,} role(s) close within 72h — the most urgent end of the open-jobs pipeline.")
+        st.plotly_chart(application_window_by_discipline_bar(_app_window_by_disc(lookback_days)), width='stretch', key="app_window_by_disc")
+        st.caption("Median application window (closing − posting date) per discipline, with the p25–p75 spread; the "
+                   "dashed line is the market-wide median. Disciplines need at least 10 dated postings to appear.")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROLES
@@ -514,6 +585,12 @@ with t_institutions:
                     df_b.columns = ["Category", "Jobs"]
                     st.dataframe(df_b, hide_index=True, width='stretch')
 
+        st.divider()
+        st.plotly_chart(recruiter_concentration_curve(_inst_distribution(lookback_days)), width='stretch', key="recruiter_concentration")
+        st.caption("Lorenz curve over true posting dates (last 120 days). The dashed line is perfect equality; the "
+                   "further the blue curve sags below it, the more a few institutions dominate hiring "
+                   "(Gini 0 = even, 1 = one recruiter posts everything).")
+
     with sub_geography:
         col_geo_l, col_geo_r = st.columns(2)
         with col_geo_l:
@@ -530,6 +607,10 @@ with t_institutions:
         st.plotly_chart(region_category_heatmap(_region_matrix(lookback_days)), width='stretch', key="region_category")
         st.caption("Location and salary are parsed from each job's detail page. The map and bar cover UK nations; "
                    "International roles appear in the bar but not the map.")
+        st.plotly_chart(intl_vs_uk_profile_bars(_intl_vs_uk(lookback_days)), width='stretch', key="intl_vs_uk_profile")
+        st.caption("How International and UK postings differ in structure, shown as shares so the much larger UK "
+                   "sample doesn't dominate. The salary-disclosure bar is the key gap: International pay is non-GBP "
+                   "and reads as undisclosed, so only the disclosure rate is compared — never a £ value.")
 
     with sub_dynamics:
         col_l2, col_r2 = st.columns(2)

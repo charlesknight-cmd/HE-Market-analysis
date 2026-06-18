@@ -5,6 +5,32 @@ All notable changes to this project are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+- **Nine new charts** exploiting the now ~3-month `date_posted` history and the
+  high enrichment fill rates (closing_date/location/date_posted ~100%,
+  contract/hours/region ~96%):
+  - **Posting volume by true posting date** (Trends › Volume) — daily count +
+    7-day average over `date_posted`, with the early window dimmed (survivorship
+    undercount) and the last day or two flagged provisional.
+  - **Weekday posting cadence** (Trends › Volume) — postings by day of week.
+  - **Salary-transparency gap by discipline & region** (Trends › Pay) — % of
+    postings with no parseable salary vs the overall baseline (the NULL is the
+    signal, so this is immune to the 82% salary fill rate).
+  - **Casualisation league table** (Trends › Contracts) — fixed-term share per
+    discipline, diverging from the market baseline (min 40 contracted roles).
+  - **Precarity matrix** (Trends › Contracts) — contract-type × hours heatmap
+    with the fixed-term + part-time cell highlighted.
+  - **Days-to-apply benchmark by discipline** (Trends › Timing) — median + IQR
+    application window (`closing_date − date_posted`) per discipline.
+  - **Deadline-pressure pipeline** (Trends › Timing) — open jobs bucketed by
+    days-to-close on a red→green urgency ramp.
+  - **Recruiter concentration** (Institutions › Recruiters) — Lorenz curve with
+    Gini and top-10 share.
+  - **International vs UK structural profile** (Institutions › Geography) —
+    share-based contract/hours/disclosure comparison (never a non-GBP £ value).
+  Each query keys off `date_posted` (no scraper-launch spike) and group-level
+  cuts apply a min-N gate; all are covered by smoke-test cases and unit tests.
+
 ### Fixed
 - **UK choropleth map no longer renders as a blank square.** The map now uses
   Plotly's MapLibre `choroplethmap` trace (flat Web-Mercator) rather than the geo

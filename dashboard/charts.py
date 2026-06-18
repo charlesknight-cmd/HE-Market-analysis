@@ -6,6 +6,7 @@ from pathlib import Path
 
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import pandas as pd
 from config import CATEGORY_LABELS
 
@@ -108,6 +109,7 @@ _TOP_N = 8
 _ACCENT = "#4361EE"
 _POS = "#06A77D"
 _NEG = "#E5383B"
+_OTHER_COLOUR = "#9AA0A6"  # muted grey for de-emphasised bars (e.g. weekends)
 
 _INK = "#1A1A2E"
 _GRID = "rgba(26, 26, 46, 0.07)"
@@ -1056,3 +1058,568 @@ def region_choropleth(rows: list[dict]) -> go.Figure:
         margin=dict(l=10, r=10, t=70, b=10),
     )
     return fig
+
+
+def posting_volume_line(rows: list[dict]) -> go.Figure:
+    """Line chart: TRUE daily posting volume (by date_posted) + 7-day average.
+
+    Unlike ``daily_jobs_line`` (which counts by first_seen, i.e. when we first
+    saw a listing), this keys off each job's real publication date. Missing days
+    are reindexed onto a contiguous daily range and filled with 0 *before* the
+    rolling mean, so quiet days correctly drag the average down rather than being
+    skipped. The earliest ~14 days are dimmed (survivorship undercount: jobs
+    posted then may have closed and left the listings before we scraped them) and
+    the final 1-2 days are flagged provisional (still being indexed).
+    """
+    if not rows:
+        return _empty()
+    df = pd.DataFrame(rows)
+    df["day"] = pd.to_datetime(df["day"])
+    df = df.sort_values("day").set_index("day")
+
+    # Reindex onto a CONTIGUOUS daily range and fill gaps with 0 BEFORE rolling,
+    # so the 7-day average reflects quiet days instead of hopping over them.
+    full = pd.date_range(df.index.min(), df.index.max(), freq="D")
+    df = df.reindex(full, fill_value=0).rename_axis("day").reset_index()
+    df["rolling_7d"] = df["job_count"].rolling(7, min_periods=1).mean().round(1)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df["day"], y=df["job_count"],
+        mode="lines+markers", name="Daily",
+        line=dict(color=_ACCENT, width=1.5), opacity=0.5,
+        hovertemplate="%{x|%d %b %Y}<br>%{y} posted<extra></extra>",
+    ))
+    if len(df) >= 3:
+        fig.add_trace(go.Scatter(
+            x=df["day"], y=df["rolling_7d"],
+            mode="lines", name="7-day avg",
+            line=dict(color="#F77F00", width=2.5, shape="spline"),
+            fill="tozeroy", fillcolor="rgba(247, 127, 0, 0.10)",
+            hovertemplate="%{x|%d %b %Y}<br>7-day avg %{y}<extra></extra>",
+        ))
+
+    # Shade the unreliable edges: the earliest ~14 days undercount (survivorship
+    # — short-window jobs posted then may have closed before our first scrape)
+    # and the final 1-2 days are provisional (still being indexed).
+    start = df["day"].min()
+    end = df["day"].max()
+    warm_end = min(start + pd.Timedelta(days=14), end)
+    prov_start = max(end - pd.Timedelta(days=1), start)
+    if warm_end > start:
+        fig.add_vrect(
+            x0=start, x1=warm_end, line_width=0,
+            fillcolor="rgba(26, 26, 46, 0.06)", layer="below",
+            annotation_text="undercount", annotation_position="top left",
+            annotation_font=dict(size=10, color="grey"),
+        )
+    if end > prov_start:
+        fig.add_vrect(
+            x0=prov_start, x1=end, line_width=0,
+            fillcolor="rgba(229, 56, 59, 0.07)", layer="below",
+            annotation_text="provisional", annotation_position="top right",
+            annotation_font=dict(size=10, color="grey"),
+        )
+
+    fig.update_layout(
+        title="Job postings per day (by true posting date)",
+        xaxis=dict(title="Posting date", tickformat="%d %b %Y"),
+        yaxis=dict(title="Jobs posted"),
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    )
+    return _style_fig(fig)
+
+
+# Day-of-week order with Monday first; strftime('%w') is 0=Sun..6=Sat.
+_WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]
+_WEEKDAY_LABELS = {
+    0: "Sun", 1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat",
+}
+
+
+def weekday_cadence_bar(rows: list[dict]) -> go.Figure:
+    """Bar chart: posting cadence by day of week (Mon..Sun).
+
+    Universities publish on working days, so this exposes the weekly rhythm of
+    the market. All seven days always render — weekdays absent from the query
+    are padded to zero — and weekend bars (typically ~0) are highlighted in a
+    muted grey with a note, since a near-empty weekend is itself the finding.
+    """
+    if not rows:
+        return _empty()
+    counts = {r["dow"]: r["job_count"] for r in rows}
+    days = [_WEEKDAY_LABELS[d] for d in _WEEKDAY_ORDER]
+    values = [counts.get(d, 0) for d in _WEEKDAY_ORDER]
+    # Weekend bars (Sat=6, Sun=0) get a muted colour so the working-week shape
+    # reads at a glance.
+    colours = [_OTHER_COLOUR if d in (0, 6) else _ACCENT for d in _WEEKDAY_ORDER]
+
+    fig = go.Figure(go.Bar(
+        x=days, y=values,
+        marker_color=colours,
+        text=values,
+        textposition="outside",
+        hovertemplate="%{x}: %{y} postings<extra></extra>",
+    ))
+    weekend_total = counts.get(0, 0) + counts.get(6, 0)
+    if weekend_total == 0:
+        fig.add_annotation(
+            xref="paper", yref="paper", x=0.99, y=0.97,
+            xanchor="right", yanchor="top", showarrow=False,
+            text="Effectively no weekend posting",
+            font=dict(size=11, color="grey"),
+        )
+    fig.update_layout(
+        title="Posting cadence by day of week",
+        xaxis_title="Day posted", yaxis_title="Postings",
+        bargap=0.25,
+    )
+    return _style_fig(fig)
+
+
+def recruiter_concentration_curve(rows: list[dict]) -> go.Figure:
+    """Lorenz curve of recruiter concentration: how unequally postings are
+    spread across institutions.
+
+    x = cumulative share of institutions (smallest recruiters first), y =
+    cumulative share of postings. The 45-degree line is perfect equality (every
+    institution posts the same); the deeper the curve sags below it, the more a
+    handful of institutions dominate hiring. The Gini coefficient (0 = even,
+    1 = one recruiter posts everything) and the top-10 institutions' share are
+    summarised in the title and an in-plot annotation. Uses the whole
+    distribution, so no minimum-N gate.
+    """
+    if not rows:
+        return _empty()
+    counts = sorted(int(r["job_count"]) for r in rows)
+    n = len(counts)
+    total = sum(counts)
+    if n == 0 or total == 0:
+        return _empty()
+
+    # Gini via the ranked mean-absolute-difference formula (counts ascending).
+    cum_weighted = sum(i * c for i, c in enumerate(counts, start=1))
+    gini = (2 * cum_weighted) / (n * total) - (n + 1) / n
+    gini = max(0.0, min(gini, 1.0))
+
+    top10_share = sum(sorted(counts, reverse=True)[:10]) / total * 100
+
+    # Lorenz points: prepend (0, 0); each step adds one institution.
+    xs = [0.0]
+    ys = [0.0]
+    running = 0
+    for i, c in enumerate(counts, start=1):
+        running += c
+        xs.append(i / n * 100)
+        ys.append(running / total * 100)
+
+    fig = go.Figure()
+    # Equality reference line.
+    fig.add_trace(go.Scatter(
+        x=[0, 100], y=[0, 100],
+        mode="lines", name="Perfect equality",
+        line=dict(color=_INK, width=1.5, dash="dash"),
+        hoverinfo="skip",
+    ))
+    # Lorenz curve, with the gap to equality shaded.
+    fig.add_trace(go.Scatter(
+        x=xs, y=ys,
+        mode="lines", name="Actual distribution",
+        line=dict(color=_ACCENT, width=2.5, shape="spline"),
+        fill="tonexty", fillcolor="rgba(67, 97, 238, 0.10)",
+        hovertemplate=("Bottom %{x:.0f}% of institutions<br>"
+                       "post %{y:.0f}% of jobs<extra></extra>"),
+    ))
+    fig.add_annotation(
+        x=2, y=92, xref="x", yref="y",
+        text=(f"Gini {gini:.2f}<br>Top 10 = {top10_share:.0f}% of postings"
+              f"<br>{n} recruiters · {total} jobs"),
+        showarrow=False, align="left",
+        font=dict(size=12, color=_INK),
+        bgcolor="rgba(255,255,255,0.7)",
+    )
+    fig.update_layout(
+        title=f"Recruiter concentration (Gini {gini:.2f}, top 10 = {top10_share:.0f}%)",
+        xaxis=dict(title="Cumulative share of institutions (%)", range=[0, 100]),
+        yaxis=dict(title="Cumulative share of postings (%)", range=[0, 100]),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    )
+    return _style_fig(fig)
+
+
+# Overall undisclosed-salary baseline (~18% on live) drawn as a reference line on
+# both panels; the min group size below which a discipline/region is too thin to
+# trust a transparency rate.
+_TRANSPARENCY_BASELINE_PCT = 18.0
+_TRANSPARENCY_MIN_N = 10
+_TRANSPARENCY_TOP_DISCIPLINES = 12
+
+
+def salary_transparency_breakdown(rows: list[dict]) -> go.Figure:
+    """Two-panel horizontal bars: % of postings hiding pay, by discipline and region.
+
+    Left panel ranks the worst-offending disciplines (top ~12 by undisclosed
+    rate, slugs humanised via ``_label``); the right panel does the same across
+    UK nations / International. A dashed baseline marks the overall undisclosed
+    share (~18%) so each group reads as above- or below-average for transparency.
+
+    "Undisclosed" is ``salary_min IS NULL`` — a clean signal that is immune to
+    the ~82% salary fill rate (a parsed salary that happens to be missing still
+    counts as a real "no pay stated"). Groups thinner than ``_TRANSPARENCY_MIN_N``
+    are dropped so a couple of postings can't masquerade as a trend; blank and
+    'UK (unspecified)' regions are already excluded upstream. International reads
+    as ~100% undisclosed because its non-GBP pay never parses — expected, and
+    highlighted in red rather than hidden.
+    """
+    if not rows:
+        return _empty()
+
+    df = pd.DataFrame(rows)
+    df = df[df["n"] >= _TRANSPARENCY_MIN_N]
+    disc = df[df["dim"] == "discipline"].copy()
+    reg = df[df["dim"] == "region"].copy()
+    if disc.empty and reg.empty:
+        return _empty()
+
+    # Worst offenders first for the top-N cut, then ascending so the longest bar
+    # sits at the top of each (horizontal) panel.
+    disc = disc.sort_values("undisclosed_pct", ascending=False).head(_TRANSPARENCY_TOP_DISCIPLINES)
+    disc["label"] = disc["grp"].map(_label)
+    disc = disc.sort_values("undisclosed_pct")
+
+    reg["label"] = reg["grp"]
+    reg = reg.sort_values("undisclosed_pct")
+
+    # No subplot_titles: the per-panel "baseline" annotation sits at the top and
+    # would collide with them — the dimension is named in each x-axis title instead.
+    fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.18)
+
+    fig.add_trace(go.Bar(
+        x=disc["undisclosed_pct"], y=disc["label"], orientation="h",
+        marker_color=_ACCENT,
+        text=disc["undisclosed_pct"].apply(lambda v: f"{v:.0f}%"),
+        textposition="outside",
+        customdata=disc[["undisclosed", "n"]].values,
+        hovertemplate=("%{y}<br>%{x:.1f}% undisclosed "
+                       "(%{customdata[0]} of %{customdata[1]})<extra></extra>"),
+        showlegend=False,
+    ), row=1, col=1)
+
+    reg_colours = [_NEG if g == "International" else _ACCENT for g in reg["grp"]]
+    fig.add_trace(go.Bar(
+        x=reg["undisclosed_pct"], y=reg["label"], orientation="h",
+        marker_color=reg_colours,
+        text=reg["undisclosed_pct"].apply(lambda v: f"{v:.0f}%"),
+        textposition="outside",
+        customdata=reg[["undisclosed", "n"]].values,
+        hovertemplate=("%{y}<br>%{x:.1f}% undisclosed "
+                       "(%{customdata[0]} of %{customdata[1]})<extra></extra>"),
+        showlegend=False,
+    ), row=1, col=2)
+
+    for col in (1, 2):
+        fig.add_vline(
+            x=_TRANSPARENCY_BASELINE_PCT, line_dash="dash", line_color=_INK, opacity=0.5,
+            annotation_text=f"baseline {_TRANSPARENCY_BASELINE_PCT:.0f}%",
+            annotation_position="top", row=1, col=col,
+        )
+
+    # Headroom so the outside %-labels (and the 100% International bar) aren't clipped.
+    fig.update_xaxes(title_text="Undisclosed by discipline (%)", ticksuffix="%",
+                     rangemode="tozero", range=[0, 110], row=1, col=1)
+    fig.update_xaxes(title_text="Undisclosed by region (%)", ticksuffix="%",
+                     rangemode="tozero", range=[0, 110], row=1, col=2)
+    fig.update_yaxes(title_text="", row=1, col=1)
+    fig.update_yaxes(title_text="", row=1, col=2)
+    fig.update_layout(
+        title="Salary-transparency gap by discipline and region",
+        bargap=0.25,
+        margin=dict(l=160),
+    )
+    return _style_fig(fig)
+
+
+def intl_vs_uk_profile_bars(rows: list[dict]) -> go.Figure:
+    """Grouped horizontal bars: International vs UK structural profile (share %).
+
+    Compares the two sides across share-based metrics only — salary-disclosure
+    rate, permanent/fixed-term mix and full/part-time mix — so the headcount gap
+    between International and UK postings never dominates. Salary disclosure is
+    placed at the top and the two series coloured distinctly to make the
+    transparency gap the first thing read; no International median-£ is shown
+    (International pay is non-GBP, so only the *disclosure rate* is comparable).
+    """
+    if not rows:
+        return _empty(_NO_GEO_MSG)
+    by_side = {r["side"]: r for r in rows}
+    if "International" not in by_side or "UK" not in by_side:
+        return _empty("Need both International and UK postings to compare")
+
+    # Disclosure first (the headline gap), then contract mix, then hours mix.
+    metrics = [
+        ("pct_salary_disclosed", "Salary disclosed"),
+        ("pct_permanent",        "Permanent"),
+        ("pct_fixed_term",       "Fixed-term"),
+        ("pct_full_time",        "Full-time"),
+        ("pct_part_time",        "Part-time"),
+    ]
+    # Reverse so the first metric (disclosure) sits at the top of the y-axis.
+    y_labels = [lbl for _, lbl in metrics][::-1]
+
+    fig = go.Figure()
+    for side, colour in [("UK", _ACCENT), ("International", _NEG)]:
+        r = by_side[side]
+        vals = [r.get(key) for key, _ in metrics][::-1]
+        plotted = [v if v is not None else 0 for v in vals]
+        fig.add_trace(go.Bar(
+            y=y_labels, x=plotted,
+            orientation="h",
+            name=f"{side} (n={r['total']})",
+            marker_color=colour,
+            text=[f"{v:.0f}%" if v is not None else "n/a" for v in vals],
+            textposition="outside",
+            hovertemplate=f"{side} — %{{y}}: %{{x:.1f}}%<extra></extra>",
+        ))
+
+    fig.update_layout(
+        title="International vs UK: structural profile (share %)",
+        xaxis=dict(title="Share of postings (%)", range=[0, 112], ticksuffix="%"),
+        yaxis_title="",
+        barmode="group",
+        bargap=0.3, bargroupgap=0.1,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        margin=dict(l=130),
+    )
+    return _style_fig(fig)
+
+
+def casualisation_by_discipline_bar(rows: list[dict]) -> go.Figure:
+    """Diverging bars: each discipline's fixed-term share vs the market baseline.
+
+    The casualisation "league table". The market baseline is the overall
+    fixed-term share across the supplied disciplines (sample-weighted by n), drawn
+    as a dashed reference line. Each bar spans from that baseline to the
+    discipline's own fixed-term %, so length encodes the gap: disciplines more
+    casualised than the market run right in _NEG, less casualised run left in
+    _POS. Bars are ordered by fixed-term % (least casualised at the bottom), the
+    exact share is labelled on each bar, and n shows on hover.
+    """
+    if not rows:
+        return _empty()
+    total_n = sum(r["n"] for r in rows)
+    if total_n == 0:
+        return _empty()
+    # Sample-weighted overall fixed-term share = market baseline.
+    baseline = sum(r["fixed_term_pct"] * r["n"] for r in rows) / total_n
+
+    df = pd.DataFrame(rows)
+    df["label"] = df["category"].map(_label)
+    df["delta"] = df["fixed_term_pct"] - baseline
+    df["colour"] = df["delta"].apply(lambda d: _NEG if d >= 0 else _POS)
+    df = df.sort_values("fixed_term_pct")
+
+    fig = go.Figure(go.Bar(
+        x=df["delta"], y=df["label"],
+        base=baseline,
+        orientation="h",
+        marker_color=df["colour"],
+        text=df["fixed_term_pct"].apply(lambda p: f"{p:.0f}%"),
+        textposition="outside",
+        customdata=df[["fixed_term_pct", "n"]].values,
+        hovertemplate=("%{y}<br>Fixed-term: %{customdata[0]:.1f}%<br>"
+                       "(%{customdata[1]} contracted roles)<extra></extra>"),
+    ))
+    fig.add_vline(
+        x=baseline, line_dash="dash", line_color="grey",
+        annotation_text=f"market baseline {baseline:.0f}%",
+        annotation_position="top",
+    )
+    fig.update_layout(
+        title="Casualisation league table: fixed-term share by discipline",
+        xaxis=dict(title="Fixed-term contracts (%)", ticksuffix="%", range=[0, 100]),
+        yaxis_title="",
+        margin=dict(l=200),
+        showlegend=False,
+    )
+    return _style_fig(fig)
+
+
+def application_window_by_discipline_bar(rows: list[dict]) -> go.Figure:
+    """Horizontal dot-and-whisker: median days-to-apply per discipline.
+
+    Each discipline is a dot at its median application window, spanned by an IQR
+    whisker (p25–p75); a dashed reference line marks the market-wide median so a
+    discipline's pace reads instantly against the field. Disciplines are sorted
+    fastest-closing at the bottom so the longest windows sit on top.
+    """
+    if not rows:
+        return _empty("No posting/closing dates yet — runs after enrichment")
+    df = pd.DataFrame(rows)
+    # Sort so the largest median ends up at the top of a horizontal axis.
+    df = df.sort_values("median_days", ascending=True)
+    df["label"] = df["category"].map(_label)
+    market_median = df["market_median"].iloc[0]
+
+    fig = go.Figure()
+    # IQR whiskers (p25-p75) as per-row line segments (go.Scatter has no base).
+    for _, row in df.iterrows():
+        fig.add_trace(go.Scatter(
+            x=[row["p25"], row["p75"]], y=[row["label"], row["label"]],
+            mode="lines",
+            line=dict(color="rgba(67, 97, 238, 0.35)", width=6),
+            hoverinfo="skip", showlegend=False,
+        ))
+    # Median dots.
+    fig.add_trace(go.Scatter(
+        x=df["median_days"], y=df["label"],
+        mode="markers",
+        marker=dict(size=12, color=_ACCENT, line=dict(width=1, color="white")),
+        customdata=df[["p25", "p75", "n"]].values,
+        hovertemplate=(
+            "%{y}<br>Median: %{x:.0f} days"
+            "<br>IQR: %{customdata[0]:.0f}–%{customdata[1]:.0f} days"
+            "<br>(%{customdata[2]} jobs)<extra></extra>"
+        ),
+        showlegend=False,
+    ))
+    fig.add_vline(
+        x=market_median, line_dash="dash", line_color=_NEG,
+        annotation_text=f"market median {market_median:.0f}d",
+        annotation_position="top",
+    )
+    fig.update_layout(
+        title="Days-to-apply benchmark by discipline",
+        xaxis=dict(title="Application window (days, closing − posted)", rangemode="tozero"),
+        yaxis_title="",
+        margin=dict(l=200),
+    )
+    return _style_fig(fig)
+
+
+def precarity_matrix_heatmap(rows: list[dict]) -> go.Figure:
+    """Annotated heatmap of contract_type (rows) x hours (cols) — the precarity matrix.
+
+    Cells carry both the count and its share of the enriched total. The
+    fixed-term + part-time "doubly precarious" cell is outlined and emphasised so
+    it reads at a glance. Whole-market grain; subtitle states the enriched n.
+    """
+    if not rows:
+        return _empty("No contract/hours data yet — runs after enrichment")
+    df = pd.DataFrame(rows)
+    total = int(df["job_count"].sum())
+    if total == 0:
+        return _empty("No contract/hours data yet — runs after enrichment")
+
+    # Fixed axis order so the matrix is always laid out the same way regardless of
+    # which combinations happen to be present in the window.
+    row_order = ["permanent", "fixed-term"]
+    col_order = ["full-time", "part-time", "flexible"]
+    row_labels = {"permanent": "Permanent", "fixed-term": "Fixed-term"}
+    col_labels = {"full-time": "Full-time", "part-time": "Part-time", "flexible": "Flexible"}
+
+    pivot = (df.pivot_table(index="contract_type", columns="hours",
+                            values="job_count", aggfunc="sum", fill_value=0)
+               .reindex(index=row_order, columns=col_order, fill_value=0))
+
+    z = pivot.values
+    x = [col_labels[c] for c in pivot.columns]
+    y = [row_labels[r] for r in pivot.index]
+
+    fig = go.Figure(go.Heatmap(
+        z=z, x=x, y=y,
+        colorscale="OrRd", zmin=0,
+        hovertemplate="%{y} · %{x}<br>%{z} jobs<extra></extra>",
+        colorbar_title="Jobs",
+    ))
+
+    # Annotate every cell with count + % of total, choosing readable text colour
+    # against the OrRd fill (dark text on the pale cells, white on the hot ones).
+    zmax = z.max() or 1
+    for ri, r_slug in enumerate(pivot.index):
+        for ci, c_slug in enumerate(pivot.columns):
+            n = int(pivot.iloc[ri, ci])
+            pct = n / total * 100
+            text_color = "white" if (n / zmax) > 0.55 else _INK
+            fig.add_annotation(
+                x=x[ci], y=y[ri],
+                text=f"<b>{n}</b><br>{pct:.0f}%",
+                showarrow=False,
+                font=dict(family=_FONT, size=13, color=text_color),
+            )
+
+    # Outline the fixed-term + part-time "doubly precarious" cell.
+    if "fixed-term" in pivot.index and "part-time" in pivot.columns:
+        hi_r = list(pivot.index).index("fixed-term")
+        hi_c = list(pivot.columns).index("part-time")
+        fig.add_shape(
+            type="rect",
+            x0=hi_c - 0.5, x1=hi_c + 0.5,
+            y0=hi_r - 0.5, y1=hi_r + 0.5,
+            line=dict(color=_NEG, width=3),
+            fillcolor="rgba(0,0,0,0)",
+            layer="above",
+        )
+
+    fig.update_layout(
+        title=dict(text=("Precarity matrix: contract type × hours"
+                         f"<br><span style='font-size:13px;color:#6E7681'>"
+                         f"enriched subset, n={total:,}</span>")),
+        xaxis=dict(title="", side="top"),
+        yaxis=dict(title="", autorange="reversed"),
+    )
+    return _style_fig(fig)
+
+
+# Add to dashboard/charts.py (Trends > Timing section, e.g. next to upcoming_deadlines_bar).
+
+# Ordered urgency bands (most urgent first) with a red -> green ramp:
+# imminent deadlines are red, comfortable ones green.
+_DEADLINE_BUCKETS = ["0-3", "4-7", "8-14", "15-30", "30+"]
+_DEADLINE_LABELS = {
+    "0-3":   "0-3 days",
+    "4-7":   "4-7 days",
+    "8-14":  "8-14 days",
+    "15-30": "15-30 days",
+    "30+":   "30+ days",
+}
+_DEADLINE_COLOURS = {
+    "0-3":   _NEG,        # red — closing within 72h
+    "4-7":   "#F77F00",   # orange
+    "8-14":  "#F4C430",   # amber
+    "15-30": "#5BB85B",   # light green
+    "30+":   _POS,        # green — plenty of time
+}
+
+
+def deadline_pressure_bar(rows: list[dict]) -> go.Figure:
+    """Vertical bar histogram of open jobs by days-to-deadline urgency band.
+
+    Single series across the five ordered bands (0-3 / 4-7 / 8-14 / 15-30 / 30+)
+    with a red -> green ramp so the urgent end reads hot. Mirrors the deadline
+    pipeline of upcoming_deadlines_bar but framed as time-pressure rather than
+    calendar week.
+    """
+    if not rows:
+        return _empty("No upcoming closing dates")
+    df = pd.DataFrame(rows)
+    df["bucket"] = pd.Categorical(df["bucket"], categories=_DEADLINE_BUCKETS, ordered=True)
+    df = df.sort_values("bucket")
+    if df["job_count"].sum() == 0:
+        return _empty("No upcoming closing dates")
+    df["label"] = df["bucket"].map(_DEADLINE_LABELS)
+    df["colour"] = df["bucket"].map(_DEADLINE_COLOURS)
+    fig = go.Figure(go.Bar(
+        x=df["label"], y=df["job_count"],
+        marker_color=df["colour"],
+        text=df["job_count"], textposition="outside",
+        hovertemplate="Closing in %{x}<br>%{y} open jobs<extra></extra>",
+    ))
+    fig.update_layout(
+        title="Deadline pressure — open jobs by time left to apply",
+        xaxis=dict(title="Days until deadline", categoryorder="array",
+                   categoryarray=[_DEADLINE_LABELS[b] for b in _DEADLINE_BUCKETS]),
+        yaxis_title="Open jobs",
+        showlegend=False,
+    )
+    return _style_fig(fig)

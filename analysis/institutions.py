@@ -160,3 +160,29 @@ def new_vs_repeat_institutions(weeks: int = 12) -> list[dict]:
         weekly[r["week"]][key] += 1
 
     return [{"week": w, **v} for w, v in sorted(weekly.items())]
+
+
+def institution_posting_distribution(days: int = 120) -> list[dict]:
+    """Per-institution posting counts over the last N days (true posting date).
+
+    Feeds the recruiter-concentration Lorenz curve, so it returns the *whole*
+    distribution (every institution, no min-N gate) sorted ascending by count.
+    Uses the date_posted column directly (YYYY-MM-DD, 100% filled) and drops
+    null/blank institutions.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                institution,
+                COUNT(*) AS job_count
+            FROM jobs
+            WHERE date_posted >= date('now', :offset)
+              AND institution IS NOT NULL
+              AND TRIM(institution) <> ''
+            GROUP BY institution
+            ORDER BY job_count ASC
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+    return [dict(r) for r in rows]

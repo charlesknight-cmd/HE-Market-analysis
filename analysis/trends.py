@@ -657,3 +657,330 @@ def salary_by_region(days: int = 180, min_jobs: int = 3) -> list[dict]:
 def salary_by_contract_type(days: int = 180, min_jobs: int = 3) -> list[dict]:
     """Median salary floor for permanent vs fixed-term roles."""
     return _median_salary_by("contract_type", days, min_jobs)
+
+
+def daily_postings_trend(days: int = 120) -> list[dict]:
+    """TRUE daily posting volume over the last N days, by date_posted.
+
+    Counts postings grouped by their real publication date (the date_posted
+    column, YYYY-MM-DD and 100%% filled), not by when we first saw them in the
+    listings. This is the true-posting-date analogue of ``daily_new_jobs``,
+    which keys off first_seen. date_posted needs no _CLEAN_TS wrapper.
+
+    Returns rows of {day, job_count}; days with no postings are simply absent
+    here — the builder reindexes onto a contiguous date range and fills gaps.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                date_posted AS day,
+                COUNT(*)    AS job_count
+            FROM jobs
+            WHERE date_posted IS NOT NULL
+              AND date_posted >= date('now', :offset)
+            GROUP BY date_posted
+            ORDER BY date_posted
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def postings_by_weekday(days: int = 120) -> list[dict]:
+    """Posting counts grouped by day of week over the last N days.
+
+    Uses the TRUE posting date (date_posted, 100% filled, no _CLEAN_TS needed).
+    `dow` follows SQLite's strftime('%w') convention: 0=Sunday .. 6=Saturday.
+    Weekdays with no postings simply don't appear here — the builder pads the
+    missing days to zero so all seven always render.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                CAST(strftime('%w', date_posted) AS INTEGER) AS dow,
+                COUNT(*)                                      AS job_count
+            FROM jobs
+            WHERE date_posted IS NOT NULL
+              AND date_posted >= date('now', :offset)
+            GROUP BY dow
+            ORDER BY dow
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def salary_disclosure_by_group(days: int = 120) -> list[dict]:
+    """Salary-transparency gap per discipline AND per region (TRUE posting-date window).
+
+    For postings whose ``date_posted`` falls in the last ``days`` days, count
+    per group how many state no parseable salary. "Undisclosed" is strictly
+    ``salary_min IS NULL`` — this is the clean signal and is immune to the ~82%
+    salary fill rate (a NULL means we genuinely could not parse a salary). The
+    separate <£12k hourly-rate contamination is a *pay*-chart concern and is
+    deliberately NOT folded in here.
+
+    Two dimensions are returned in one pass, tagged by ``dim``:
+      - ``dim='discipline'`` — grouped by the ``category`` slug
+      - ``dim='region'`` — grouped by ``region`` (UK nation / International),
+        dropping blank regions and the unhelpful 'UK (unspecified)' bucket.
+
+    Returns rows of {grp, dim, n, undisclosed, undisclosed_pct}. The min-N
+    filter is applied in the builder so callers can see raw group sizes here.
+    date_posted is YYYY-MM-DD and 100% filled, so it needs no _CLEAN_TS wrapper.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                category AS grp,
+                'discipline' AS dim,
+                COUNT(*) AS n,
+                SUM(CASE WHEN salary_min IS NULL THEN 1 ELSE 0 END) AS undisclosed
+            FROM jobs
+            WHERE date_posted >= date('now', :offset)
+              AND category IS NOT NULL
+              AND category != ''
+            GROUP BY category
+            UNION ALL
+            SELECT
+                region AS grp,
+                'region' AS dim,
+                COUNT(*) AS n,
+                SUM(CASE WHEN salary_min IS NULL THEN 1 ELSE 0 END) AS undisclosed
+            FROM jobs
+            WHERE date_posted >= date('now', :offset)
+              AND region IS NOT NULL
+              AND region != ''
+              AND region != 'UK (unspecified)'
+            GROUP BY region
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+    result = []
+    for r in rows:
+        n = r["n"] or 0
+        und = r["undisclosed"] or 0
+        result.append({
+            "grp": r["grp"],
+            "dim": r["dim"],
+            "n": n,
+            "undisclosed": und,
+            "undisclosed_pct": round(und / n * 100, 1) if n else 0,
+        })
+    return result
+
+
+def intl_vs_uk_profile(days: int = 120) -> list[dict]:
+    """Structural profile of International vs UK postings as SHARE (%) metrics.
+
+    Splits rows into two sides — 'International' (region == 'International') and
+    'UK' (the four nations plus 'UK (unspecified)', i.e. any non-International
+    region) — then for each side computes share-based breakdowns so the ~263 vs
+    ~2000 size gap can't dominate the comparison:
+
+      * contract-type mix: % permanent and % fixed-term (of postings whose
+        contract_type is known);
+      * hours mix: % full-time and % part-time (of postings whose hours are
+        known);
+      * salary-disclosure rate: % of all postings on that side carrying a
+        sane annual salary floor (salary_min NOT NULL AND >= 12000 — the £12k
+        floor strips the hourly-rate contamination noted in the data caveats).
+
+    Uses the true posting date (date_posted, 100% filled) for the window so it
+    needs no _CLEAN_TS wrapper. Returns one dict per side; NEVER returns any
+    International median-£ value (International salaries are non-GBP, so a £
+    figure would be meaningless — only the disclosure *rate* is reported).
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                CASE WHEN region = 'International' THEN 'International' ELSE 'UK' END
+                                                                        AS side,
+                COUNT(*)                                                AS total,
+                SUM(CASE WHEN contract_type IS NOT NULL THEN 1 ELSE 0 END)
+                                                                        AS contract_known,
+                SUM(CASE WHEN contract_type = 'permanent'  THEN 1 ELSE 0 END)
+                                                                        AS permanent,
+                SUM(CASE WHEN contract_type = 'fixed-term' THEN 1 ELSE 0 END)
+                                                                        AS fixed_term,
+                SUM(CASE WHEN hours IS NOT NULL THEN 1 ELSE 0 END)      AS hours_known,
+                SUM(CASE WHEN hours = 'full-time' THEN 1 ELSE 0 END)    AS full_time,
+                SUM(CASE WHEN hours = 'part-time' THEN 1 ELSE 0 END)    AS part_time,
+                SUM(CASE WHEN salary_min IS NOT NULL AND salary_min >= 12000
+                         THEN 1 ELSE 0 END)                             AS salaried
+            FROM jobs
+            WHERE region IS NOT NULL
+              AND date_posted >= date('now', :offset)
+            GROUP BY side
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+
+    def _pct(n: int, d: int):
+        return round(n / d * 100, 1) if d else None
+
+    result = []
+    for r in rows:
+        total = r["total"] or 0
+        ck = r["contract_known"] or 0
+        hk = r["hours_known"] or 0
+        result.append({
+            "side":                 r["side"],
+            "total":                total,
+            "pct_permanent":        _pct(r["permanent"], ck),
+            "pct_fixed_term":       _pct(r["fixed_term"], ck),
+            "pct_full_time":        _pct(r["full_time"], hk),
+            "pct_part_time":        _pct(r["part_time"], hk),
+            "pct_salary_disclosed": _pct(r["salaried"], total),
+        })
+    return result
+
+
+def fixed_term_share_by_discipline(days: int = 180, min_n: int = 40) -> list[dict]:
+    """Per-discipline casualisation: fixed-term share of contracted postings.
+
+    Over the true-posting-date window, for postings whose contract_type is known
+    to be permanent or fixed-term, compute
+        fixed_term_pct = fixed-term / (permanent + fixed-term) * 100
+    per discipline, alongside the sample size n. Only disciplines with at least
+    `min_n` contracted postings are kept, so the league table isn't dominated by
+    thin, noisy samples. Sorted ascending by fixed_term_pct (least to most
+    casualised). Uses date_posted directly (YYYY-MM-DD, 100% filled) — no
+    _CLEAN_TS wrapper needed.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                category,
+                COUNT(*)                                                       AS n,
+                SUM(CASE WHEN contract_type = 'fixed-term' THEN 1 ELSE 0 END)  AS fixed_term,
+                ROUND(
+                    SUM(CASE WHEN contract_type = 'fixed-term' THEN 1 ELSE 0 END)
+                    * 100.0 / COUNT(*), 1
+                )                                                              AS fixed_term_pct
+            FROM jobs
+            WHERE contract_type IN ('permanent', 'fixed-term')
+              AND date_posted >= date('now', :offset)
+            GROUP BY category
+            HAVING n >= :min_n
+            ORDER BY fixed_term_pct ASC
+            """,
+            {"offset": f"-{days} days", "min_n": min_n},
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def application_window_by_discipline(days: int = 180, min_n: int = 10) -> list[dict]:
+    """Application-window benchmark per discipline over the posting-date window.
+
+    window_days = closing_date − date_posted, computed from the TRUE posting date
+    (date_posted is YYYY-MM-DD and 100% filled, so no _CLEAN_TS wrapper is needed)
+    and clamped to a sane 0–180 day range to drop data-entry noise. For every
+    discipline with at least `min_n` such jobs we return the median (plus the
+    25th/75th percentiles for an IQR whisker) and the sample size; `market_median`
+    is the all-discipline median, carried on each row so the builder can draw a
+    single reference line without re-querying. Sorted fastest-closing first.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT category,
+                   julianday(closing_date) - julianday(date_posted) AS window_days
+            FROM jobs
+            WHERE closing_date IS NOT NULL
+              AND date_posted IS NOT NULL
+              AND category IS NOT NULL
+              AND date_posted >= date('now', :offset)
+              AND (julianday(closing_date) - julianday(date_posted)) BETWEEN 0 AND 180
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+
+    by_cat: dict[str, list] = defaultdict(list)
+    all_windows: list[float] = []
+    for r in rows:
+        by_cat[r["category"]].append(r["window_days"])
+        all_windows.append(r["window_days"])
+
+    if not all_windows:
+        return []
+
+    market_median = round(_percentile(all_windows, 0.5), 1)
+    result = []
+    for cat, windows in by_cat.items():
+        if len(windows) >= min_n:
+            result.append({
+                "category": cat,
+                "median_days": round(_percentile(windows, 0.5), 1),
+                "p25": round(_percentile(windows, 0.25), 1),
+                "p75": round(_percentile(windows, 0.75), 1),
+                "n": len(windows),
+                "market_median": market_median,
+            })
+    return sorted(result, key=lambda x: x["median_days"])
+
+
+def contract_hours_matrix(days: int = 180) -> list[dict]:
+    """Posting counts cross-tabbed by contract_type x hours — the precarity matrix.
+
+    Whole-market grain over the true posting-date window (date_posted is 100%
+    filled and needs no _CLEAN_TS wrapper). Both dimensions come from detail-page
+    enrichment, so rows where either is NULL are excluded; the resulting total is
+    the enriched subset the builder reports as n=...
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT contract_type,
+                   hours,
+                   COUNT(*) AS job_count
+            FROM jobs
+            WHERE contract_type IS NOT NULL
+              AND hours IS NOT NULL
+              AND date_posted >= date('now', :offset)
+            GROUP BY contract_type, hours
+            ORDER BY contract_type, hours
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def deadline_urgency_buckets() -> list[dict]:
+    """Bucket currently-open jobs by how many days remain until their deadline.
+
+    For every open job (closing_date >= today) compute days-to-close as
+    julianday(closing_date) - julianday('now') and drop it into one of five
+    ordered urgency bands. Returns one row per band, always all five and in
+    urgency order (most urgent first), padding empty bands with zero so the
+    deadline-pressure histogram draws a complete, stable axis.
+
+    closing_date is YYYY-MM-DD and 100% filled, so it is used directly (no
+    _CLEAN_TS wrapper needed).
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                CASE
+                    WHEN julianday(closing_date) - julianday('now') < 4  THEN '0-3'
+                    WHEN julianday(closing_date) - julianday('now') < 8  THEN '4-7'
+                    WHEN julianday(closing_date) - julianday('now') < 15 THEN '8-14'
+                    WHEN julianday(closing_date) - julianday('now') < 31 THEN '15-30'
+                    ELSE '30+'
+                END     AS bucket,
+                COUNT(*) AS job_count
+            FROM jobs
+            WHERE closing_date IS NOT NULL
+              AND closing_date >= date('now')
+            GROUP BY bucket
+            """
+        ).fetchall()
+    counts = {r["bucket"]: r["job_count"] for r in rows}
+    order = ["0-3", "4-7", "8-14", "15-30", "30+"]
+    return [{"bucket": b, "job_count": counts.get(b, 0)} for b in order]

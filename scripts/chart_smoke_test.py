@@ -12,7 +12,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from analysis import trends
 from analysis.institutions import (
-    new_vs_repeat_institutions, salary_by_institution, top_institutions,
+    institution_posting_distribution, new_vs_repeat_institutions,
+    salary_by_institution, top_institutions,
 )
 from dashboard import charts
 
@@ -52,6 +53,15 @@ CASES = [
     ("salary_by_region_bar", charts.salary_by_region_bar, lambda: trends.salary_by_region(days=max(LOOKBACK_DAYS, 90))),
     ("salary_by_contract_bar", charts.salary_by_contract_bar, lambda: trends.salary_by_contract_type(days=max(LOOKBACK_DAYS, 90))),
     ("region_category_heatmap", charts.region_category_heatmap, lambda: trends.region_category_matrix(days=LOOKBACK_DAYS)),
+    ("posting_volume_line", charts.posting_volume_line, lambda: trends.daily_postings_trend(days=120)),
+    ("weekday_cadence_bar", charts.weekday_cadence_bar, lambda: trends.postings_by_weekday(days=120)),
+    ("recruiter_concentration_curve", charts.recruiter_concentration_curve, lambda: institution_posting_distribution(days=max(LOOKBACK_DAYS, 120))),
+    ("salary_transparency_breakdown", charts.salary_transparency_breakdown, lambda: trends.salary_disclosure_by_group(days=max(LOOKBACK_DAYS, 120))),
+    ("intl_vs_uk_profile_bars", charts.intl_vs_uk_profile_bars, lambda: trends.intl_vs_uk_profile(days=max(LOOKBACK_DAYS, 120))),
+    ("casualisation_by_discipline_bar", charts.casualisation_by_discipline_bar, lambda: trends.fixed_term_share_by_discipline(days=180, min_n=40)),
+    ("application_window_by_discipline_bar", charts.application_window_by_discipline_bar, lambda: trends.application_window_by_discipline(days=max(LOOKBACK_DAYS, 90), min_n=10)),
+    ("precarity_matrix_heatmap", charts.precarity_matrix_heatmap, lambda: trends.contract_hours_matrix(days=max(LOOKBACK_DAYS, 90))),
+    ("deadline_pressure_bar", charts.deadline_pressure_bar, trends.deadline_urgency_buckets),
 ]
 
 
