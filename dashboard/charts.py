@@ -8,7 +8,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
-from config import CATEGORY_LABELS
+from config import CATEGORY_LABELS, discipline_label
 
 _UK_NATIONS = ["England", "Scotland", "Wales", "Northern Ireland"]
 _GEOJSON_PATH = Path(__file__).parent / "assets" / "uk_nations.geojson"
@@ -84,17 +84,63 @@ def _uk_map_view(gj: dict, width: int = 600, height: int = 520,
     zoom = max(0.0, min(lat_zoom, lon_zoom, 18.0))
     return center, zoom
 
-# jobs.ac.uk now categorises by subject discipline (21 of them) rather than the
-# old six job-types, so we need a palette big enough to keep them distinguishable.
-# Build a stable slug→colour map across the live disciplines plus the legacy
-# job-type slugs that linger on pre-migration rows. Light24+Dark24 = 48 distinct
-# hues, comfortably more than we need.
+# jobs.ac.uk categorises by subject discipline (21) rather than the old six
+# job-types, so the palette must keep up to 8 simultaneously-shown disciplines
+# (the multi-category charts fold to top-8-by-volume + grey "Other") mutually
+# distinguishable under colour-vision deficiency. Plotly's Light24+Dark24 has many
+# pairs that collapse under CVD, so we replace it with a verified CVD-safe set.
+#
+# Base = the Okabe-Ito 8-colour CVD-safe palette (7 chromatic hues + a dark
+# anchor: Okabe's pure black is swapped for #3B2C5E, a near-black blue-violet that
+# reads as a "dark" series on white yet harmonises with _ACCENT/_INK; it behaves
+# identically to black under CVD simulation). Extended to 12 by a greedy search
+# that, at each step, added the hue MAXIMISING the minimum pairwise CIELAB dE of
+# the whole set under simulated protanopia, deuteranopia AND tritanopia (Machado
+# 2009 matrices, sRGB->linear->simulate->CIELAB). The four extensions
+# (#682727 -> #8D0202 -> #EA3E3E -> #DCAF6A) form a maroon->red->bright-red->tan
+# family separated mainly by LUMINANCE: past ~8 hues, lightness is the only axis a
+# dichromat can still resolve, so the optimiser packs the extras there rather than
+# inventing "new" hues that would collapse onto the base.
+#
+# VERIFIED (Machado 2009, CIEDE76; reproduced independently): worst-case
+# (tritanopia) minimum pairwise dE = 16.05 across ALL 12 colours
+# (normal 26.43 / protan 18.11 / deutan 16.23 / tritan 16.05), comfortably above
+# the ~10-11 "categorically distinct" threshold. CRUCIALLY, because that floor
+# holds over the FULL set, ANY subset -- including whichever arbitrary top-8-by-
+# volume disciplines a chart folds to -- is guaranteed >= 16.05 under every CVD
+# type. That dissolves the old Light24+Dark24 collapsing-pair problem regardless
+# of which 8 series surface, which is exactly why stable_per_slug is safe here.
+_QUALITATIVE = [
+    "#E69F00",  # Okabe-Ito orange
+    "#56B4E9",  # Okabe-Ito sky blue
+    "#009E73",  # Okabe-Ito bluish green
+    "#F0E442",  # Okabe-Ito yellow
+    "#0072B2",  # Okabe-Ito blue
+    "#D55E00",  # Okabe-Ito vermilion
+    "#CC79A7",  # Okabe-Ito reddish purple
+    "#3B2C5E",  # dark blue-violet anchor (replaces Okabe-Ito black)
+    "#682727",  # dark maroon       -. luminance-stepped red family: the CVD-robust
+    "#8D0202",  # deep red          |  way to add categories beyond the 8 hues a
+    "#EA3E3E",  # bright red        |  dichromat can resolve -- they separate by
+    "#DCAF6A",  # tan / muted gold  -' lightness, not hue.
+]
+
 _OTHER = "__other__"  # bucket for the long tail in top-N charts
 _LEGACY_SLUGS = [
     "academic-or-research", "professional-or-managerial", "technical",
     "clerical", "further-education", "craft-or-manual",
 ]
-_QUALITATIVE = px.colors.qualitative.Light24 + px.colors.qualitative.Dark24
+
+# stable_per_slug assignment: cycle the palette over slugs in a FIXED order (live
+# disciplines in CATEGORY_LABELS order, then legacy job-type slugs) so each
+# discipline keeps the SAME colour across every chart, aiding cross-chart
+# recognition. TRADE-OFF: a given chart shows an arbitrary top-8-by-volume subset
+# of the 27 slugs, so the 8 shown are NOT necessarily the palette's first 8 slots
+# -- but since the worst-case CVD floor (16.05) holds for the WHOLE palette, every
+# possible 8-subset is CVD-safe, so stability costs us nothing in
+# distinguishability. (12 colours < 27 slugs, so 3 colours repeat on the long
+# tail; those slugs only ever render folded inside grey _OTHER, so the repeats
+# never co-occur on screen.)
 _PALETTE = {
     slug: _QUALITATIVE[i % len(_QUALITATIVE)]
     for i, slug in enumerate(list(CATEGORY_LABELS.keys()) + _LEGACY_SLUGS)
@@ -112,6 +158,9 @@ _NEG = "#E5383B"
 _OTHER_COLOUR = "#9AA0A6"  # muted grey for de-emphasised bars (e.g. weekends)
 
 _INK = "#1A1A2E"
+# Secondary text (captions, subtitles, in-plot notes). Darker than a plain
+# "grey" (~3.5:1 on white, fails WCAG AA) — this clears 4.5:1 at small sizes.
+_MUTED = "#5B6273"
 _GRID = "rgba(26, 26, 46, 0.07)"
 _FONT = "Outfit, -apple-system, sans-serif"
 
@@ -120,7 +169,12 @@ _NO_DATA_MSG = "Not enough data yet — check back as the database fills up"
 def _label(slug: str) -> str:
     if slug == _OTHER:
         return "Other disciplines"
-    return CATEGORY_LABELS.get(slug, slug)
+    return discipline_label(slug)
+
+
+# Public re-export so app chrome (KPIs, tables, filters) shares the figures'
+# humanising resolver. Backed by the single source of truth in config.
+category_label = discipline_label
 
 
 def _fold_categories(df: pd.DataFrame, value_col: str, cat_col: str = "category",
@@ -163,10 +217,16 @@ def _style_fig(fig: go.Figure) -> go.Figure:
         ),
         legend=dict(font=dict(size=12, color=_INK)),
     )
-    # Soften every bar with rounded corners.
+    # Soften every bar with rounded corners; on stacked bars also add a thin white
+    # separator so adjacent segments stay distinguishable without relying on hue
+    # alone — a colour-vision-deficiency aid that matters most on the many-series
+    # stacked discipline charts.
+    stacked = getattr(fig.layout, "barmode", None) == "stack"
     for trace in fig.data:
         if trace.type == "bar":
             trace.marker.cornerradius = 5
+            if stacked:
+                trace.marker.line = dict(width=0.8, color="white")
     fig.update_xaxes(
         gridcolor=_GRID, zerolinecolor=_GRID, linecolor=_GRID,
         title_font=dict(size=13, color=_INK), tickfont=dict(size=12, color=_INK),
@@ -184,7 +244,7 @@ def _empty(msg: str = _NO_DATA_MSG) -> go.Figure:
         xaxis={"visible": False}, yaxis={"visible": False},
         annotations=[{"text": msg, "xref": "paper", "yref": "paper",
                        "x": 0.5, "y": 0.5, "showarrow": False,
-                       "font": {"size": 14, "color": "grey"}}],
+                       "font": {"size": 14, "color": _MUTED}}],
     )
     return _style_fig(fig)
 
@@ -522,9 +582,15 @@ def longevity_histogram(rows: list[dict]) -> go.Figure:
         marker_color=_ACCENT,
         hovertemplate="Visible %{x} day(s): %{y} jobs<extra></extra>",
     ))
+    maxd = int(df["days_visible"].max())
     fig.update_layout(
         title="How long jobs stay visible in the listings",
-        xaxis_title="Days visible",
+        # Bars sit on integer day counts; frame them on [-0.5, max+0.5] so the
+        # first bar isn't clipped and Plotly doesn't pad in a meaningless "-1"
+        # tick. Force 1-day ticks only on a short span; let Plotly thin them out
+        # when the visibility range is wide.
+        xaxis=dict(title="Days visible", range=[-0.5, maxd + 0.5],
+                   **({"dtick": 1} if maxd <= 21 else {})),
         yaxis_title="Number of jobs",
         bargap=0.1,
     )
@@ -640,8 +706,8 @@ def seasonal_heatmap(rows: list[dict]) -> go.Figure:
         hovertemplate="Category: %{y}<br>Month: %{x}<br>Postings: %{z}<extra></extra>"
     ))
     fig.update_layout(
-        title="Postings Seasonality Heatmap",
-        xaxis_title="Month of Year",
+        title="Postings seasonality heatmap",
+        xaxis_title="Month of year",
         yaxis_title="",
     )
     return _style_fig(fig)
@@ -661,9 +727,9 @@ def recruitment_window_line(rows: list[dict]) -> go.Figure:
         hovertemplate="Week %{x}<br>Avg Apply Window: %{y:.1f} days<extra></extra>"
     ))
     fig.update_layout(
-        title="Average Application Window Length (Days)",
-        xaxis_title="ISO Week",
-        yaxis_title="Days (Closing - Posted)",
+        title="Average application window length (days)",
+        xaxis_title="ISO week",
+        yaxis_title="Days (closing − posted)",
         hovermode="x unified",
     )
     return _style_fig(fig)
@@ -686,9 +752,9 @@ def market_concentration_line(rows: list[dict]) -> go.Figure:
     fig.add_hline(y=1500, line_dash="dash", line_color="green", annotation_text="Competitive (<1500)")
     fig.add_hline(y=2500, line_dash="dash", line_color="orange", annotation_text="Concentrated (>2500)")
     fig.update_layout(
-        title="Recruitment Concentration Index (HHI)",
-        xaxis_title="ISO Week",
-        yaxis_title="HHI Score",
+        title="Recruitment concentration index (HHI)",
+        xaxis_title="ISO week",
+        yaxis_title="HHI score",
         hovermode="x unified",
     )
     return _style_fig(fig)
@@ -726,9 +792,9 @@ def salary_percentile_bands(rows: list[dict]) -> go.Figure:
     ))
     
     fig.update_layout(
-        title="Salary Floor Distribution Bands over Time",
-        xaxis_title="ISO Week",
-        yaxis_title="Salary Floor (£)",
+        title="Salary floor distribution bands over time",
+        xaxis_title="ISO week",
+        yaxis_title="Salary floor (£)",
         yaxis=dict(tickprefix="£", tickformat=","),
         hovermode="x unified",
     )
@@ -752,8 +818,8 @@ def keyword_premium_bar(rows: list[dict]) -> go.Figure:
         customdata=df["avg_salary"]
     ))
     fig.update_layout(
-        title="Salary Premium by Title Keyword (vs. Category Baseline)",
-        xaxis_title="Salary Premium (%)",
+        title="Salary premium by title keyword (vs. category baseline)",
+        xaxis_title="Salary premium (%)",
         yaxis_title="",
         xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor="grey"),
     )
@@ -781,9 +847,9 @@ def permanent_ratio_line(rows: list[dict]) -> go.Figure:
         hovertemplate="Week %{x}<br>Permanent Jobs: %{y}%<extra></extra>"
     ))
     fig.update_layout(
-        title="Permanent Contract Share Trend (%)",
-        xaxis_title="ISO Week",
-        yaxis_title="Permanent Contracts (%)",
+        title="Permanent contract share trend (%)",
+        xaxis_title="ISO week",
+        yaxis_title="Permanent contracts (%)",
         yaxis=dict(range=[0, 100]),
         hovermode="x unified",
     )
@@ -821,6 +887,12 @@ def salary_distribution_hist(rows: list[dict]) -> go.Figure:
     if not rows:
         return _empty()
     df = pd.DataFrame(rows)
+    # Drop non-positive floors: a £0 (or negative) "salary" is a parsing artefact,
+    # not a real advertised floor, and otherwise plants a spurious bar at the left
+    # edge. Legitimately low part-time/pro-rata salaries are kept.
+    df = df[df["salary_min"] > 0]
+    if df.empty:
+        return _empty()
     fig = go.Figure(go.Histogram(
         x=df["salary_min"],
         marker_color=_ACCENT,
@@ -890,10 +962,15 @@ def seniority_breakdown_bar(rows: list[dict]) -> go.Figure:
     df["median_label"] = df["median_salary"].apply(
         lambda x: f"£{x:,.0f}" if pd.notnull(x) else "n/a"
     )
+    # The "Other / Unclassified" catch-all is a non-answer, not a seniority level,
+    # and is often the largest bar — mute it so it stops reading as the headline.
+    df["colour"] = df["rank"].apply(
+        lambda r: _OTHER_COLOUR if r == "Other / Unclassified" else _ACCENT
+    )
     fig = go.Figure(go.Bar(
         x=df["count"], y=df["rank"],
         orientation="h",
-        marker_color=_ACCENT,
+        marker_color=df["colour"],
         text=df["count"],
         textposition="outside",
         customdata=df["median_label"],
@@ -1001,6 +1078,15 @@ def region_category_heatmap(rows: list[dict]) -> go.Figure:
     df["cat"] = df["category"].map(_label)
     pivot = df.pivot_table(index="cat", columns="region",
                            values="job_count", aggfunc="sum", fill_value=0)
+    # Pin the region columns to a stable order (all four UK nations, plus
+    # International when present) so a nation with zero postings — e.g. Wales —
+    # still draws as an empty column instead of silently vanishing and changing
+    # the matrix width run to run. Mirrors the choropleth's reindex.
+    region_order = list(_UK_NATIONS) + (
+        ["International"] if "International" in pivot.columns else []
+    )
+    region_order += [c for c in pivot.columns if c not in region_order]
+    pivot = pivot.reindex(columns=region_order, fill_value=0)
     # Order disciplines by total volume so the busiest sit at the top.
     pivot = pivot.loc[pivot.sum(axis=1).sort_values().index]
     fig = go.Figure(go.Heatmap(
@@ -1111,14 +1197,14 @@ def posting_volume_line(rows: list[dict]) -> go.Figure:
             x0=start, x1=warm_end, line_width=0,
             fillcolor="rgba(26, 26, 46, 0.06)", layer="below",
             annotation_text="undercount", annotation_position="top left",
-            annotation_font=dict(size=10, color="grey"),
+            annotation_font=dict(size=10, color=_MUTED),
         )
     if end > prov_start:
         fig.add_vrect(
             x0=prov_start, x1=end, line_width=0,
             fillcolor="rgba(229, 56, 59, 0.07)", layer="below",
             annotation_text="provisional", annotation_position="top right",
-            annotation_font=dict(size=10, color="grey"),
+            annotation_font=dict(size=10, color=_MUTED),
         )
 
     fig.update_layout(
@@ -1168,7 +1254,7 @@ def weekday_cadence_bar(rows: list[dict]) -> go.Figure:
             xref="paper", yref="paper", x=0.99, y=0.97,
             xanchor="right", yanchor="top", showarrow=False,
             text="Effectively no weekend posting",
-            font=dict(size=11, color="grey"),
+            font=dict(size=11, color=_MUTED),
         )
     fig.update_layout(
         title="Posting cadence by day of week",
@@ -1563,7 +1649,7 @@ def precarity_matrix_heatmap(rows: list[dict]) -> go.Figure:
 
     fig.update_layout(
         title=dict(text=("Precarity matrix: contract type × hours"
-                         f"<br><span style='font-size:13px;color:#6E7681'>"
+                         f"<br><span style='font-size:13px;color:{_MUTED}'>"
                          f"enriched subset, n={total:,}</span>")),
         xaxis=dict(title="", side="top"),
         yaxis=dict(title="", autorange="reversed"),

@@ -49,6 +49,38 @@ PAGE_DELAY = 1.0  # seconds between page requests (per discipline)
 # The dashboard/analysis "category" dimension is now the discipline.
 CATEGORY_LABELS = DISCIPLINES
 
+# Connector words kept lowercase when prettifying a slug that has no explicit
+# display name (matches how the legacy job-type names read, e.g. "Academic or
+# Research").
+_SLUG_SMALL_WORDS = {"and", "or", "of", "the", "inc", "a"}
+# Tokens that should render fully uppercased rather than title-cased, so an
+# acronym-bearing slug doesn't come out as "Uk Wide" / "It Services".
+_SLUG_ACRONYMS = {"uk", "eu", "us", "it", "hr", "ict", "ai", "phd", "tefl", "stem"}
+
+
+def discipline_label(slug: str) -> str:
+    """Resolve a category slug to a human display name — the single source of truth.
+
+    Known disciplines come straight from CATEGORY_LABELS; anything else (the old
+    job-type slugs such as ``academic-or-research`` that still ride on
+    pre-migration rows, or any unforeseen slug) is prettified into its readable
+    form — ``academic-or-research`` -> ``Academic or Research`` — rather than
+    leaking raw kebab-case into legends, axes, tables and alert messages. Shared
+    by the dashboard (charts/app) and the analysis/alerts layer so they can never
+    drift apart.
+    """
+    if slug in CATEGORY_LABELS:
+        return CATEGORY_LABELS[slug]
+    words = str(slug).replace("_", "-").replace("-", " ").split()
+    if not words:
+        return str(slug)
+    return " ".join(
+        w.upper() if w in _SLUG_ACRONYMS
+        else w if (i and w in _SLUG_SMALL_WORDS)
+        else w[:1].upper() + w[1:]
+        for i, w in enumerate(words)
+    )
+
 # Time of day to run the daily scheduled scrape (24 h HH:MM)
 SCHEDULE_TIME = "07:00"
 

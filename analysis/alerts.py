@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal
 
-from config import ALERT_THRESHOLDS, CATEGORY_LABELS
+from config import ALERT_THRESHOLDS, discipline_label
 from analysis.institutions import spike_candidates
 from analysis.trends import category_growth_wow
 
@@ -12,7 +12,7 @@ from analysis.trends import category_growth_wow
 def _friendly_cats(category_list: str) -> str:
     """Convert 'academic-or-research,further-education' to readable labels."""
     return ", ".join(
-        CATEGORY_LABELS.get(s.strip(), s.strip())
+        discipline_label(s.strip())
         for s in category_list.split(",")
         if s.strip()
     )
@@ -72,7 +72,7 @@ def check_category_growth() -> list[Alert]:
         pct = row["change_pct"]
         if pct is None:
             continue
-        label = CATEGORY_LABELS.get(row["category"], row["category"])
+        label = discipline_label(row["category"])
         if abs(pct) >= threshold:
             severity: Severity = "warning" if abs(pct) >= threshold * 2 else "info"
             if pct > 0:

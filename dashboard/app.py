@@ -70,6 +70,7 @@ from analysis.trends import (
 )
 from config import CATEGORY_LABELS
 from dashboard.charts import (
+    category_label,
     category_growth_bar,
     category_share_area,
     category_weekly_bar,
@@ -124,7 +125,14 @@ st.set_page_config(
 
 # ── Password gate ─────────────────────────────────────────────────────────────
 
-_required_pwd = st.secrets.get("password", "")
+# st.secrets raises StreamlitSecretNotFoundError (not KeyError) when no
+# secrets.toml exists at all, so `.get(..., "")` does NOT fall back to the
+# default — it propagates and crashes the whole app on startup. Guard it so a
+# missing secrets file simply means "no password gate" (e.g. local dev).
+try:
+    _required_pwd = st.secrets.get("password", "")
+except Exception:
+    _required_pwd = ""
 if _required_pwd:
     if not st.session_state.get("authenticated"):
         st.title("HE Job Market Analysis")
@@ -137,15 +145,22 @@ if _required_pwd:
         st.stop()
 
 _head_left, _head_right = st.columns([5, 1])
-with _head_left:
-    st.title("HE Job Market Analysis")
-    _last = last_scrape_time()
-    _scraped = f" · last scraped {_last[:16]} UTC" if _last else ""
-    st.caption(f"Data sourced from jobs.ac.uk · refreshes daily at 07:00{_scraped}")
+# Render the filters popover first so the active lookback is known when we build
+# the header caption — that way the current window is always visible without
+# opening the popover. (Column display order is fixed by the columns list, not by
+# the order of these `with` blocks.)
 with _head_right:
     with st.popover("⚙ Filters", width="stretch"):
         lookback_days = st.slider("Lookback window (days)", 7, 180, 30, step=7)
         st.caption("Charts cache for 5 minutes")
+with _head_left:
+    st.title("HE Job Market Analysis")
+    _last = last_scrape_time()
+    _scraped = f" · last scraped {_last[:16]} UTC" if _last else ""
+    st.caption(
+        f"Data sourced from jobs.ac.uk · refreshes daily at 07:00{_scraped} · "
+        f"**showing last {lookback_days} days** (⚙ Filters to change)"
+    )
 
 # Site-change note for users (June 2026 source/taxonomy migration).
 with st.expander("ℹ️ Update — June 2026: how jobs are categorised has changed", expanded=False):
@@ -180,28 +195,41 @@ st.markdown("""
         border-radius: 16px;
         padding: 20px 24px;
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.01);
-        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
+                    box-shadow 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
+                    border-color 0.3s ease, background 0.3s ease;
     }
-    
+
     div[data-testid="stMetric"]:hover {
         transform: translateY(-4px);
         border-color: rgba(128, 128, 128, 0.3);
         background: rgba(128, 128, 128, 0.08);
         box-shadow: 0 12px 24px rgba(0, 0, 0, 0.06);
     }
-    
+
     /* Styled Tab bar */
     button[data-baseweb="tab"] {
         font-weight: 500;
         padding: 12px 24px;
         border-radius: 8px 8px 0 0;
-        transition: all 0.2s ease;
+        transition: background-color 0.2s ease, color 0.2s ease;
     }
-    
+
     /* Active tab styling */
     button[aria-selected="true"] {
         background-color: rgba(76, 114, 176, 0.08) !important;
         color: #4C72B0 !important;
+    }
+
+    /* Respect reduced-motion: drop the hover lift and transitions. */
+    @media (prefers-reduced-motion: reduce) {
+        div[data-testid="stMetric"],
+        button[data-baseweb="tab"] {
+            transition: none;
+        }
+        div[data-testid="stMetric"]:hover {
+            transform: none;
+        }
     }
     </style>
 """, unsafe_allow_html=True)
@@ -351,13 +379,18 @@ t_overview, t_trends, t_roles, t_institutions, t_data = st.tabs(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with t_overview:
+    st.caption(
+        "At-a-glance market health. Go deeper in **Trends** (volume · pay · "
+        "contracts · timing), **Roles** (seniority · salaries), **Institutions** "
+        "(recruiters · geography · dynamics) and **Data** (the raw, exportable table)."
+    )
     summary = _summary()
     k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("Total jobs", f"{summary['total_jobs']:,}")
     k2.metric("New (7 days)", f"{summary['new_7d']:,}")
     k3.metric("New (30 days)", f"{summary['new_30d']:,}")
     k4.metric("Institutions", f"{summary['institutions']:,}")
-    k5.metric("Categories", summary["categories"])
+    k5.metric("Disciplines", summary["categories"])
 
     st.divider()
     col_l, col_r = st.columns(2)
@@ -379,10 +412,10 @@ with t_overview:
 
         def _render_insight(a):
             m = meta.get(a.severity, {"label": "Insight", "icon": "•"})
-            msg = a.message
-            for slug, label in CATEGORY_LABELS.items():
-                msg = msg.replace(slug, label)
-            st.info(f"{m['icon']} **{m['label']}** — {msg}")
+            # Messages are already humanised at the source (analysis/alerts.py uses
+            # discipline_label), so no slug-substitution pass is needed here — and
+            # skipping it avoids ever mangling a hyphenated institution name.
+            st.info(f"{m['icon']} **{m['label']}** — {a.message}")
 
         for a in alerts[:3]:
             _render_insight(a)
@@ -398,7 +431,11 @@ with t_overview:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with t_trends:
-    st.caption("Charts fill in as the database accumulates weeks of history.")
+    st.caption(
+        "How the market moves over time — sub-tabs: **Volume & Seasonality** · "
+        "**Pay** · **Contracts** · **Timing**. Charts fill in as the database "
+        "accumulates weeks of history."
+    )
     sub_volume, sub_pay, sub_contract, sub_timing = st.tabs(
         ["Volume & Seasonality", "Pay", "Contracts", "Timing"]
     )
@@ -467,6 +504,11 @@ with t_trends:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with t_roles:
+    st.caption(
+        "What's being hired and what it pays — sub-tabs: **Role Types** "
+        "(seniority, title words, growth) · **Salaries** (distribution, ranges, "
+        "keyword premiums)."
+    )
     sub_roletypes, sub_salaries = st.tabs(["Role Types", "Salaries"])
 
     with sub_roletypes:
@@ -485,9 +527,9 @@ with t_roles:
             growth = _cat_growth()
             if growth:
                 df_g = pd.DataFrame(growth)
-                df_g["category"] = df_g["category"].map(lambda s: CATEGORY_LABELS.get(s, s))
+                df_g["category"] = df_g["category"].map(category_label)
                 df_g = df_g.rename(columns={
-                    "category": "Category", "last_week": "Last week",
+                    "category": "Discipline", "last_week": "Last week",
                     "this_week": "This week", "change_pct": "Change %",
                 })
                 st.dataframe(df_g, hide_index=True, width='stretch')
@@ -503,7 +545,7 @@ with t_roles:
         if sal:
             df_s = pd.DataFrame(sal)
             df_s = df_s.sort_values("week").groupby("category").last().reset_index()
-            df_s["category"] = df_s["category"].map(lambda s: CATEGORY_LABELS.get(s, s))
+            df_s["category"] = df_s["category"].map(category_label)
             df_s["avg_salary_min"] = df_s["avg_salary_min"].apply(
                 lambda x: f"£{x:,.0f}" if x else "—"
             )
@@ -511,11 +553,11 @@ with t_roles:
                 lambda x: f"£{x:,.0f}" if x else "—"
             )
             df_s = df_s.rename(columns={
-                "category": "Category", "avg_salary_min": "Avg floor",
+                "category": "Discipline", "avg_salary_min": "Avg floor",
                 "avg_salary_max": "Avg ceiling", "n": "Jobs with salary",
             })
             st.dataframe(
-                df_s[["Category", "Avg floor", "Avg ceiling", "Jobs with salary"]],
+                df_s[["Discipline", "Avg floor", "Avg ceiling", "Jobs with salary"]],
                 hide_index=True, width='stretch',
             )
 
@@ -533,6 +575,11 @@ with t_roles:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with t_institutions:
+    st.caption(
+        "Who's recruiting and where — sub-tabs: **Recruiters** (top employers, "
+        "spikes, drill-down) · **Geography** (map, regions, locations) · "
+        "**Dynamics** (pay vs volume, concentration, churn)."
+    )
     sub_recruiters, sub_geography, sub_dynamics = st.tabs(
         ["Recruiters", "Geography", "Dynamics"]
     )
@@ -550,9 +597,9 @@ with t_institutions:
             if spikes:
                 df_sp = pd.DataFrame(spikes)[["institution", "job_count", "category_list"]]
                 df_sp["category_list"] = df_sp["category_list"].apply(
-                    lambda s: ", ".join(CATEGORY_LABELS.get(c.strip(), c.strip()) for c in s.split(","))
+                    lambda s: ", ".join(category_label(c.strip()) for c in s.split(","))
                 )
-                df_sp.columns = ["Institution", "Jobs", "Categories"]
+                df_sp.columns = ["Institution", "Jobs", "Disciplines"]
                 st.dataframe(df_sp, hide_index=True, width='stretch')
             else:
                 st.info("No spikes detected in this window.")
@@ -581,8 +628,8 @@ with t_institutions:
                 inst_rows = [r for r in breakdown if r["institution"] == selected]
                 if inst_rows:
                     df_b = pd.DataFrame(inst_rows)[["category", "job_count"]]
-                    df_b["category"] = df_b["category"].map(lambda s: CATEGORY_LABELS.get(s, s))
-                    df_b.columns = ["Category", "Jobs"]
+                    df_b["category"] = df_b["category"].map(category_label)
+                    df_b.columns = ["Discipline", "Jobs"]
                     st.dataframe(df_b, hide_index=True, width='stretch')
 
         st.divider()
@@ -639,6 +686,10 @@ with t_institutions:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with t_data:
+    st.caption(
+        "Every job behind the charts — filter by discipline, institution or salary "
+        "floor, then download the result as CSV."
+    )
     all_jobs = _all_jobs()
     df_all = pd.DataFrame(all_jobs)
 
@@ -648,8 +699,8 @@ with t_data:
         fc1, fc2, fc3 = st.columns(3)
         with fc1:
             cat_filter = st.multiselect(
-                "Category", options=list(CATEGORY_LABELS.keys()),
-                format_func=lambda s: CATEGORY_LABELS.get(s, s),
+                "Discipline", options=list(CATEGORY_LABELS.keys()),
+                format_func=category_label,
             )
         with fc2:
             inst_search = st.text_input("Institution contains")
@@ -670,11 +721,11 @@ with t_data:
         show_cols = ["title", "institution", "category", "region", "salary_raw",
                      "date_posted", "closing_date", "first_seen", "url"]
         df_display = df_filtered[show_cols].rename(columns={
-            "title": "Title", "institution": "Institution", "category": "Category",
+            "title": "Title", "institution": "Institution", "category": "Discipline",
             "region": "Region", "salary_raw": "Salary", "date_posted": "Posted",
             "closing_date": "Closes", "first_seen": "First seen", "url": "URL",
         })
-        df_display["Category"] = df_display["Category"].map(lambda s: CATEGORY_LABELS.get(s, s))
+        df_display["Discipline"] = df_display["Discipline"].map(category_label)
 
         st.dataframe(
             df_display, hide_index=True, width='stretch',

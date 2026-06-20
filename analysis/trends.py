@@ -16,6 +16,11 @@ _STOPWORDS = {
     'that', 'which', 'has', 'have', 'had', 'will', 'would', 'our', 'your',
     'their', 'we', 'you', 'he', 'she', 'it', 'they', 'amp', 'new', 'fixed',
     'term', 'based', 'part', 'time', 'full',
+    # Geographic / institutional tokens — not role descriptors, so they muddy the
+    # "title keyword" framing of the word-frequency and salary-premium charts
+    # (e.g. "london" reading as a high-premium keyword is London weighting, not a
+    # role). Filtered from both since both treat tokens as role signals.
+    'london', 'uk', 'united', 'kingdom', 'university', 'college', 'school',
 }
 
 
@@ -167,6 +172,89 @@ def daily_new_jobs(days: int = 30) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+# --- Conservative singular/plural folding -------------------------------------
+# Safety model: a plural is folded into its singular ONLY when that singular is
+# ALSO an attested key in the same aggregated data (never invent a stem). Two
+# extra guards make the must-not-mangle words impossible to collapse even if a
+# coincidental shorter token exists:
+#   1. suffix guard  -> -ss/-us/-is/-sis/-ics/-ous (business, campus, analysis,
+#                       physics/mathematics/economics, status...)
+#   2. word blocklist -> irregular Greek/Latin plurals and lexicalised -s words
+#                       (news, studies, species, series, analyses, theses,
+#                       crises, bases, indices, criteria, data, media...).
+# NOTE: do NOT add a blanket "-ses" suffix guard — it would also block the
+# regular plurals processes->process, classes->class, buses->bus. The irregular
+# -ses words are covered by _NEVER_DEPLURAL_WORDS instead.
+
+_NEVER_DEPLURAL_SUFFIXES = (
+    "ss",   # business, access, address, class, process (as a singular)
+    "us",   # campus, status, bonus, focus, syllabus
+    "is",   # basis, axis, thesis (singular)
+    "sis",  # analysis, diagnosis, emphasis, synthesis
+    "ics",  # physics, mathematics, economics, statistics, ethics
+    "ous",  # adjectival tail, never a plural
+)
+
+_NEVER_DEPLURAL_WORDS = {
+    # lexicalised -s singulars / mass nouns
+    "news", "studies", "species", "series", "lens", "bias", "kudos",
+    # irregular Greek/Latin plurals (-ses, -es, -ices, etc.)
+    "analyses", "theses", "diagnoses", "bases", "crises", "axes",
+    "indices", "matrices", "criteria", "phenomena", "data", "media",
+}
+
+
+def _singular_candidates(word: str) -> list:
+    """Plausible singular forms of a lowercased plural-looking token.
+
+    Returns [] when the token must NEVER be de-pluralised. Forms are only
+    candidates; a merge happens in merge_plural_variants and only if a
+    candidate is itself an attested key.
+    """
+    if not word.endswith("s"):
+        return []
+    if word in _NEVER_DEPLURAL_WORDS:
+        return []
+    for suf in _NEVER_DEPLURAL_SUFFIXES:
+        if word.endswith(suf):
+            return []
+
+    cands = []
+    if word.endswith("ies") and len(word) > 4:    # libraries -> library
+        cands.append(word[:-3] + "y")
+    if word.endswith("es") and len(word) > 4:      # processes -> process, classes -> class
+        cands.append(word[:-2])
+    if len(word) > 3:                              # lecturers -> lecturer
+        cands.append(word[:-1])
+
+    seen, out = set(), []
+    for c in cands:
+        if c and c != word and c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+
+def merge_plural_variants(counts) -> dict:
+    """Fold plural tokens into their singular when BOTH forms occur in `counts`.
+
+    `counts` MUST be the FINAL aggregated token->count mapping (dict or Counter),
+    never a per-title slice. A plural is merged only if its singular candidate is
+    already a key, so no stem is ever invented. Processing is in sorted() order
+    for determinism. Returns a new plain dict.
+    """
+    keys = set(counts.keys())
+    merged = dict(counts)
+    for word in sorted(counts.keys()):
+        if word not in merged:
+            continue
+        for cand in _singular_candidates(word):
+            if cand in keys and cand in merged:
+                merged[cand] = merged.get(cand, 0) + merged.pop(word)
+                break
+    return merged
+
+
 def title_word_frequency(days: int = 90, top_n: int = 30) -> list[dict]:
     """Top words appearing in job titles over the last N days."""
     with get_connection() as conn:
@@ -179,7 +267,12 @@ def title_word_frequency(days: int = 90, top_n: int = 30) -> list[dict]:
         tokens = re.findall(r"\b[a-zA-Z][a-zA-Z]+\b", title or "")
         tokens = [t.lower() for t in tokens if t.lower() not in _STOPWORDS and len(t) > 2]
         words.update(tokens)
-    return [{"term": t, "count": c} for t, c in words.most_common(top_n)]
+    # Fold singular/plural variants on the AGGREGATED counts (e.g. lecturer +
+    # lecturers -> lecturer). Sorted (-count, term) replaces most_common so the
+    # plain-dict result still ranks highest-first with a deterministic tiebreak.
+    merged = merge_plural_variants(words)
+    ranked = sorted(merged.items(), key=lambda kv: (-kv[1], kv[0]))[:top_n]
+    return [{"term": t, "count": c} for t, c in ranked]
 
 
 def job_longevity_distribution() -> list[dict]:
@@ -417,9 +510,34 @@ def keyword_salary_premiums(days: int = 90, min_occurrences: int = 2) -> list[di
         title = r["title"] or ""
         tokens = re.findall(r"\b[a-zA-Z][a-zA-Z]+\b", title)
         unique_tokens = {t.lower() for t in tokens if t.lower() not in _STOPWORDS and len(t) > 2}
+        # Collapse a singular+plural pair WITHIN the same title (e.g. "Lecturer and
+        # Senior Lecturers") down to the singular, so this one title contributes a
+        # single (salary, baseline) tuple to the merged concept rather than two —
+        # the aggregate fold below would otherwise double-count it.
+        unique_tokens -= {
+            tok for tok in unique_tokens
+            if any(c in unique_tokens for c in _singular_candidates(tok))
+        }
         for token in unique_tokens:
             baseline = cat_baselines.get(r["category"], r["salary_min"])
             keyword_data[token].append((r["salary_min"], baseline))
+
+    # Fold singular/plural variants ACROSS titles on the FINAL aggregated keys
+    # (singular in one title, plural in another). Within-title pairs are already
+    # collapsed above, so each title contributes at most once to a merged key; we
+    # pick survivors from the per-token counts, then concatenate each folded
+    # plural's (salary, baseline) tuples onto its singular survivor, keeping
+    # count / avg_salary / premium_pct correct.
+    token_counts = {tok: len(vals) for tok, vals in keyword_data.items()}
+    survivors = set(merge_plural_variants(token_counts).keys())
+    merged_data = defaultdict(list)
+    for tok, vals in keyword_data.items():
+        if tok in survivors:
+            target = tok
+        else:
+            target = next((c for c in _singular_candidates(tok) if c in survivors), tok)
+        merged_data[target].extend(vals)
+    keyword_data = merged_data
 
     premiums = []
     for token, values in keyword_data.items():

@@ -12,7 +12,7 @@ import sys
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from config import CATEGORY_LABELS
+from config import discipline_label
 from analysis.alerts import check_all, print_alerts
 from analysis.institutions import top_institutions, spike_candidates
 from analysis.trends import (
@@ -54,7 +54,7 @@ def run_report(days: int = 30) -> None:
         print(f"  {'Category':<35} {'Last wk':>8} {'This wk':>8} {'Change':>8}")
         print(f"  {'-'*35} {'-'*8} {'-'*8} {'-'*8}")
         for r in growth:
-            label = CATEGORY_LABELS.get(r["category"], r["category"])
+            label = discipline_label(r["category"])
             pct = f"{r['change_pct']:+.1f}%" if r["change_pct"] is not None else "  n/a"
             print(f"  {label:<35} {r['last_week']:>8} {r['this_week']:>8} {pct:>8}")
 
@@ -95,7 +95,7 @@ def run_report(days: int = 30) -> None:
         print(f"  {'Category':<35} {'Avg £min':>10} {'Avg £max':>10} {'n':>5}")
         print(f"  {'-'*35} {'-'*10} {'-'*10} {'-'*5}")
         for cat, r in sorted(latest.items()):
-            label = CATEGORY_LABELS.get(cat, cat)
+            label = discipline_label(cat)
             lo = f"£{r['avg_salary_min']:,.0f}" if r["avg_salary_min"] else "  —"
             hi = f"£{r['avg_salary_max']:,.0f}" if r["avg_salary_max"] else "  —"
             print(f"  {label:<35} {lo:>10} {hi:>10} {r['n']:>5}")

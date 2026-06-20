@@ -6,3 +6,6 @@ __pycache__/
 *.pyo
 .env
 venv/
+
+# Local critique cache from the impeccable design skill (not project code)
+.impeccable/

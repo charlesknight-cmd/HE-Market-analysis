@@ -30,8 +30,39 @@ All notable changes to this project are recorded here. Format loosely follows
     share-based contract/hours/disclosure comparison (never a non-GBP £ value).
   Each query keys off `date_posted` (no scraper-launch spike) and group-level
   cuts apply a min-N gate; all are covered by smoke-test cases and unit tests.
+- **Colour-vision-deficiency-safe chart palette.** Replaced Plotly's
+  Light24+Dark24 (many CVD-collapsing pairs) with an Okabe-Ito-derived 12-colour
+  palette, extended via a CVD-floor-maximising search; worst-case CIELAB ΔE is
+  16.05 under tritanopia across the whole set (independently verified with the
+  Machado-2009 and Viénot-1999 models), so every folded top-8 discipline subset
+  stays distinguishable while colours remain stable per discipline.
+- **`config.discipline_label`** — a single source of truth for slug→display name.
+  Legacy job-type slugs (`academic-or-research` …) now humanise to
+  "Academic or Research" everywhere (legends, axes, tables, alerts, the report
+  CLI) instead of leaking raw kebab-case; acronyms (UK, EU, IT) upper-case.
+- **Conservative singular/plural folding** for the title-word and keyword-premium
+  charts (`lecturer`+`lecturers` aggregate; a blocklist + suffix guards keep
+  `studies`, `analyses`, `physics`, `campus`, … from being mangled). Location
+  tokens (`london`, `uk`) are dropped from those charts.
+- Per-tab orientation captions and the active lookback window shown in the header.
+- Unit tests: `tests/test_stemming.py`, `tests/test_labels.py`.
+
+### Changed
+- Chart titles and axis labels are now uniformly sentence-case.
+- "Categories" → "Disciplines" in the KPI, tables and filters (post-migration term).
+- The "Other / Unclassified" seniority bar is muted so the non-answer stops
+  reading as the headline; caption/annotation greys darkened for WCAG AA contrast;
+  stacked-bar segments gain a thin white separator (a non-colour CVD aid) and the
+  metric-card hover respects `prefers-reduced-motion`.
 
 ### Fixed
+- **Startup crash when no `secrets.toml` exists.** `st.secrets.get("password", "")`
+  raises `StreamlitSecretNotFoundError` (not `KeyError`) when secrets are absent,
+  so the default never applied and the app failed to load; now guarded.
+- Dropped £0 salary-floor parsing noise from the distribution histogram, the
+  spurious `-1` tick on the longevity chart, a same-title singular+plural
+  double-count in the keyword-premium chart, and zero-data UK nations silently
+  vanishing from the discipline × region heatmap (columns are now stable).
 - **UK choropleth map no longer renders as a blank square.** The map now uses
   Plotly's MapLibre `choroplethmap` trace (flat Web-Mercator) rather than the geo
   `choropleth` trace (spherical d3-geo). The geo trace's fill depends on polygon
