@@ -252,12 +252,20 @@ def _empty(msg: str = _NO_DATA_MSG) -> go.Figure:
 # ── Overview charts ───────────────────────────────────────────────────────────
 
 def daily_jobs_line(rows: list[dict]) -> go.Figure:
-    """Line chart: new jobs per day with optional 7-day rolling average."""
+    """Line chart: new jobs per day with optional 7-day rolling average.
+
+    Days with no new postings (weekends, mostly) produce no row in the query,
+    so the series is reindexed onto a contiguous daily range and zero-filled
+    BEFORE the rolling mean — otherwise the average skips quiet days entirely
+    and reads too high.
+    """
     if not rows:
         return _empty()
     df = pd.DataFrame(rows)
     df["day"] = pd.to_datetime(df["day"])
-    df = df.sort_values("day")
+    df = df.sort_values("day").set_index("day")
+    full = pd.date_range(df.index.min(), df.index.max(), freq="D")
+    df = df.reindex(full, fill_value=0).rename_axis("day").reset_index()
     df["rolling_7d"] = df["job_count"].rolling(7, min_periods=1).mean().round(1)
 
     fig = go.Figure()

@@ -116,6 +116,29 @@ def test_posting_volume_line_reindexes_and_zero_fills():
     assert any(t.name == "7-day avg" for t in fig.data)
 
 
+def test_daily_jobs_line_reindexes_and_zero_fills():
+    """Same contract as posting_volume_line: weekend/quiet days with no row must
+    appear as explicit zeros before the 7-day mean, or the average reads too
+    high (it would hop over the quiet days instead of counting them)."""
+    import pandas as pd
+    # Fri then Mon — the weekend gap (Sat, Sun) must be zero-filled.
+    rows = [
+        {"day": "2026-07-10", "job_count": 20},
+        {"day": "2026-07-13", "job_count": 8},
+    ]
+    fig = charts.daily_jobs_line(rows)
+    daily = fig.data[0]
+    xs = pd.to_datetime(list(daily.x))
+    assert len(xs) == 4
+    assert (xs == pd.date_range("2026-07-10", "2026-07-13", freq="D")).all()
+    by_day = dict(zip([d.strftime("%Y-%m-%d") for d in xs], daily.y))
+    assert by_day["2026-07-11"] == 0, "Saturday must be zero-filled"
+    assert by_day["2026-07-12"] == 0, "Sunday must be zero-filled"
+    # 7-day avg must include the zeros: mean(20,0,0,8) = 7.0, not mean(20,8) = 14.
+    avg = next(t for t in fig.data if t.name == "7-day avg")
+    assert avg.y[-1] == 7.0
+
+
 def test_posting_volume_line_placeholder_when_empty():
     fig = charts.posting_volume_line([])
     assert len(fig.data) == 0
