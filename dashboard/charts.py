@@ -992,6 +992,43 @@ def seniority_breakdown_bar(rows: list[dict]) -> go.Figure:
     return _style_fig(fig)
 
 
+def seniority_salary_ladder_bar(rows: list[dict]) -> go.Figure:
+    """Horizontal bar: median full-time salary floor per seniority band (the ladder).
+
+    Rows arrive sorted by median ascending, so Plotly draws the lowest-paid rung
+    at the bottom and pay climbs upward. An asymmetric error bar shows the
+    p25–p75 spread within each band, and the sample size rides in the hover.
+    """
+    if not rows:
+        return _empty("Not enough full-time salaried postings yet")
+    df = pd.DataFrame(rows)
+    fig = go.Figure(go.Bar(
+        x=df["median_salary"], y=df["rank"],
+        orientation="h",
+        marker_color=_ACCENT,
+        error_x=dict(
+            type="data", symmetric=False,
+            array=df["p75"] - df["median_salary"],
+            arrayminus=df["median_salary"] - df["p25"],
+            color=_MUTED, thickness=1.5, width=5,
+        ),
+        text=[f"£{v:,.0f}" for v in df["median_salary"]],
+        textposition="outside",
+        customdata=list(zip(df["p25"], df["p75"], df["n"])),
+        hovertemplate=("%{y}<br>Median £%{x:,.0f}"
+                       "<br>IQR £%{customdata[0]:,.0f}–£%{customdata[1]:,.0f}"
+                       "<br>n=%{customdata[2]}<extra></extra>"),
+    ))
+    fig.update_layout(
+        title="Academic pay ladder — median floor by seniority (full-time)",
+        xaxis=dict(title="Median salary floor (£)", tickprefix="£", tickformat=","),
+        yaxis_title=None,
+        margin=dict(l=200),
+        bargap=0.35,
+    )
+    return _style_fig(fig)
+
+
 def application_window_hist(rows: list[dict]) -> go.Figure:
     """Histogram: how long jobs stay open (closing date − posting date)."""
     if not rows:

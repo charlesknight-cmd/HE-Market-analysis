@@ -70,6 +70,7 @@ from analysis.trends import (
     most_reposted_roles,
     international_destinations,
     scraper_health,
+    seniority_salary_ladder,
 )
 from config import CATEGORY_LABELS
 from dashboard.charts import (
@@ -116,6 +117,7 @@ from dashboard.charts import (
     deadline_pressure_bar,
     most_reposted_bar,
     international_destinations_bar,
+    seniority_salary_ladder_bar,
 )
 from db.queries import get_all_jobs, last_scrape_time
 
@@ -375,6 +377,8 @@ def _reposted(d):           return most_reposted_roles(days=max(d, 180), limit=1
 def _intl_destinations(d):  return international_destinations(days=max(d, 120), limit=15)
 @st.cache_data(ttl=300)
 def _scraper_health():      return scraper_health(hours=24)
+@st.cache_data(ttl=300)
+def _pay_ladder(d):         return seniority_salary_ladder(days=max(d, 365), min_n=15)
 
 weeks = max(1, lookback_days // 7)
 months = max(1, lookback_days // 30)
@@ -575,6 +579,17 @@ with t_roles:
         st.divider()
         st.plotly_chart(salary_by_contract_bar(_salary_contract(lookback_days)), width='stretch', key="salary_contract")
         st.caption("Median advertised salary floor for permanent vs fixed-term roles (contract type from enrichment).")
+
+        st.divider()
+        st.plotly_chart(seniority_salary_ladder_bar(_pay_ladder(lookback_days)), width='stretch', key="pay_ladder")
+        st.caption(
+            "The academic pay ladder: median advertised salary floor per seniority band, "
+            "climbing from PhD stipends to professorial pay, with the whisker showing the "
+            "25th–75th percentile spread within each rung. Full-time roles only — part-time "
+            "adverts quote FTE and pro-rata figures inconsistently, so restricting to "
+            "full-time is the honest like-for-like comparison. Uses ≥12 months so thinner "
+            "senior bands have enough sample."
+        )
 
         st.divider()
         st.subheader("Keyword Salary Premium Analysis")

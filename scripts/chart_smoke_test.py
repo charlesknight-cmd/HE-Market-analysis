@@ -64,6 +64,7 @@ CASES = [
     ("deadline_pressure_bar", charts.deadline_pressure_bar, trends.deadline_urgency_buckets),
     ("most_reposted_bar", charts.most_reposted_bar, lambda: trends.most_reposted_roles(days=180, limit=15)),
     ("international_destinations_bar", charts.international_destinations_bar, lambda: trends.international_destinations(days=max(LOOKBACK_DAYS, 120), limit=15)),
+    ("seniority_salary_ladder_bar", charts.seniority_salary_ladder_bar, lambda: trends.seniority_salary_ladder(days=365, min_n=15)),
 ]
 
 

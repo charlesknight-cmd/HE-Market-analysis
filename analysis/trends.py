@@ -688,6 +688,56 @@ def seniority_breakdown(days: int = 365) -> list[dict]:
     return sorted(result, key=lambda x: x["count"], reverse=True)
 
 
+def seniority_salary_ladder(days: int = 365, min_n: int = 15) -> list[dict]:
+    """Median salary floor per seniority band — the academic pay ladder.
+
+    Where ``seniority_breakdown`` ranks bands by posting *volume* (pay hidden in
+    the hover), this ranks them by *pay* and returns an IQR (p25–p75) so the
+    spread within each rung is visible, not just the midpoint.
+
+    Restricted to **full-time** roles (``hours = 'full-time'``): part-time adverts
+    on jobs.ac.uk inconsistently quote either the full-time grade figure or the
+    pro-rata'd actual, and there is no reliable textual signal to tell them apart
+    (only ~22 rows even state an FTE fraction). Filtering to full-time is the
+    honest way to compare like-for-like pay rather than fabricating a normalised
+    figure that would corrupt more rows than it fixes. The catch-all
+    'Other / Unclassified' band is dropped — it is not a seniority level. Bands
+    with fewer than ``min_n`` salaried full-time postings are omitted as too thin
+    to summarise. salary_min is already bounded to the sane band by the parsers
+    (see config.SALARY_FLOOR/CEILING), so no outlier can skew a median here.
+
+    Returns rows of {rank, median_salary, p25, p75, n} sorted by median ascending
+    (lowest rung first) so the builder can draw the ladder bottom-to-top.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT title, salary_min
+            FROM jobs
+            WHERE salary_min IS NOT NULL
+              AND hours = 'full-time'
+              AND {_CLEAN_TS} >= datetime('now', :offset)
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+
+    bands: dict[str, list] = defaultdict(list)
+    for r in rows:
+        rank = _classify_seniority(r["title"])
+        if rank == "Other / Unclassified":
+            continue
+        bands[rank].append(r["salary_min"])
+
+    result = [{
+        "rank":          rank,
+        "median_salary": round(_percentile(sals, 0.5), 0),
+        "p25":           round(_percentile(sals, 0.25), 0),
+        "p75":           round(_percentile(sals, 0.75), 0),
+        "n":             len(sals),
+    } for rank, sals in bands.items() if len(sals) >= min_n]
+    return sorted(result, key=lambda x: x["median_salary"])
+
+
 def application_window_distribution(days: int = 180) -> list[dict]:
     """Per-job application-window lengths (closing_date − date_posted) in days.
 

@@ -220,6 +220,30 @@ def test_international_destinations_bar_empty_has_scoped_message():
     assert any("international" in (a.text or "").lower() for a in fig.layout.annotations)
 
 
+def test_seniority_salary_ladder_bar_draws_iqr_whiskers():
+    """Bars are the median; the asymmetric error bar must encode the p25–p75
+    spread (array = p75−median above, arrayminus = median−p25 below), and the
+    input order (ascending median) is preserved so the ladder climbs upward."""
+    rows = [
+        {"rank": "PhD / Studentship", "median_salary": 21805, "p25": 20780, "p75": 21805, "n": 296},
+        {"rank": "Professor", "median_salary": 76812, "p25": 52712, "p75": 96940, "n": 32},
+    ]
+    fig = charts.seniority_salary_ladder_bar(rows)
+    bar = fig.data[0]
+    assert bar.orientation == "h"
+    assert list(bar.x) == [21805, 76812]
+    # Professor whisker: up = 96940-76812 = 20128, down = 76812-52712 = 24100.
+    assert bar.error_x.array[-1] == 96940 - 76812
+    assert bar.error_x.arrayminus[-1] == 76812 - 52712
+    assert bar.error_x.symmetric is False
+
+
+def test_seniority_salary_ladder_bar_empty():
+    fig = charts.seniority_salary_ladder_bar([])
+    assert len(fig.data) == 0
+    assert any("full-time" in (a.text or "").lower() for a in fig.layout.annotations)
+
+
 def test_recruiter_concentration_curve_perfect_equality():
     """An even distribution should give Gini ~0 and a curve hugging the 45° line."""
     rows = [{"institution": f"Uni {i}", "job_count": 5} for i in range(10)]
