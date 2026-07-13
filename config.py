@@ -46,6 +46,21 @@ PAGE_SIZE = 25
 MAX_PAGES_PER_CATEGORY = 60
 PAGE_DELAY = 1.0  # seconds between page requests (per discipline)
 
+# Plausible bounds for an *annual* UK HE salary, in GBP. Amounts outside this
+# band are treated as parse artefacts and dropped rather than stored, so a
+# single misparse can't skew salary aggregates or blow a chart's y-axis.
+#   Floor  £10,000 — below this is almost always an hourly rate, a pro-rata
+#           fraction, or a stipend top-up captured as if it were a full salary.
+#   Ceiling £200,000 — the highest genuine advertised value observed is a
+#           ~£136k clinical-academic consultant scale (p99.5 ≈ £110k). Real
+#           roles sit comfortably under the ceiling; values above it have been
+#           misparses (e.g. "£45,025" read as £4,502,500) or non-salary totals
+#           (e.g. a 3-year PhD funding package advertised as "up to £217,449").
+# Tune here if a genuinely higher advertised salary ever appears; rejections are
+# logged, never silent.
+SALARY_FLOOR = 10_000
+SALARY_CEILING = 200_000
+
 # The dashboard/analysis "category" dimension is now the discipline.
 CATEGORY_LABELS = DISCIPLINES
 

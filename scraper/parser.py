@@ -13,6 +13,8 @@ from datetime import date, datetime, timedelta, timezone
 
 from bs4 import BeautifulSoup
 
+from config import SALARY_CEILING, SALARY_FLOOR
+
 
 def extract_job_id(url: str) -> str | None:
     """Pull the job reference code from a jobs.ac.uk URL (e.g. 'DRR304')."""
@@ -111,8 +113,10 @@ def parse_salary(salary_raw: str | None) -> tuple[float | None, float | None]:
     for a in amounts:
         try:
             val = float(a.replace(",", ""))
-            # Exclude hourly rates or clear outliers (under £10,000 annual)
-            if val < 10000 or is_hourly:
+            # Keep only plausible annual salaries: drop hourly rates and any
+            # value outside the sane band (a misparse like "£45,025" read as
+            # £4,502,500 would otherwise poison every salary aggregate/axis).
+            if is_hourly or not (SALARY_FLOOR <= val <= SALARY_CEILING):
                 continue
             values.append(val)
         except ValueError:

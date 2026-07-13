@@ -59,6 +59,20 @@ class TestParseSalary:
     def test_mixed_keeps_only_annual(self):
         assert parse_salary("£35,000 to £45,000 per annum") == (35000.0, 45000.0)
 
+    def test_above_ceiling_excluded(self):
+        # A misparse like "£45,025" read as £4,502,500 must be rejected outright,
+        # not stored where it would blow every salary chart's y-axis.
+        assert parse_salary("£4,502,500 to £4,882,000") == (None, None)
+
+    def test_non_salary_total_above_ceiling_excluded(self):
+        # A multi-year funding package advertised as a lump sum is not an annual
+        # salary; anything above the ceiling is dropped.
+        assert parse_salary("Up to £217,449 Full financial support over three years") == (None, None)
+
+    def test_ceiling_boundary_kept(self):
+        # A genuine senior/clinical salary at the top of the real range stays.
+        assert parse_salary("£135,832 to £141,594 per annum") == (135832.0, 141594.0)
+
 
 class TestParseClosingDate:
     def test_long_month(self):

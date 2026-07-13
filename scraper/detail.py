@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from config import REQUEST_HEADERS
+from config import REQUEST_HEADERS, SALARY_CEILING, SALARY_FLOOR
 from scraper.parser import _parse_contract_type, _parse_hours
 
 _JSONLD_RE = re.compile(
@@ -101,8 +101,9 @@ def _parse_location(job: dict) -> tuple[str | None, str | None]:
 def _parse_basesalary(job: dict) -> tuple[float | None, float | None]:
     """Return (min, max) annual GBP salary from the JSON-LD baseSalary block.
 
-    Only GBP, annual (unitText YEAR) amounts of at least £10,000 are accepted, so
-    foreign-currency, hourly, or token values don't pollute the £ analytics.
+    Only GBP, annual (unitText YEAR) amounts within the plausible salary band
+    (SALARY_FLOOR..SALARY_CEILING) are accepted, so foreign-currency, hourly,
+    token, or misparsed values don't pollute the £ analytics.
     """
     bs = job.get("baseSalary")
     if not isinstance(bs, dict):
@@ -121,7 +122,7 @@ def _parse_basesalary(job: dict) -> tuple[float | None, float | None]:
             f = float(x)
         except (TypeError, ValueError):
             return None
-        return f if f >= 10000 else None
+        return f if SALARY_FLOOR <= f <= SALARY_CEILING else None
 
     mn, mx = _num(value.get("minValue")), _num(value.get("maxValue"))
     if mn is None and mx is None:
