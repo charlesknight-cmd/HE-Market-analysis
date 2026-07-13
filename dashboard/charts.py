@@ -1225,6 +1225,68 @@ def posting_volume_line(rows: list[dict]) -> go.Figure:
     return _style_fig(fig)
 
 
+def most_reposted_bar(rows: list[dict]) -> go.Figure:
+    """Horizontal bar: roles re-advertised most often (hard-to-fill signal).
+
+    Each bar is one (title @ institution) role, length = number of times it was
+    advertised over the window. Bars are ordered most-reposted at the top; the
+    hover carries the mean application window so a viewer can see whether a
+    heavily-reposted role also closes quickly (churn) or stays open a long time.
+    """
+    if not rows:
+        return _empty()
+    df = pd.DataFrame(rows)
+    # Compose a compact, unambiguous label; keep the institution on a second line
+    # via <br> so long titles don't force the left margin absurdly wide.
+    df["role"] = df["title"] + "<br><span style='font-size:11px'>" + \
+                 df["institution"] + "</span>"
+    df = df.sort_values("repost_count")  # ascending -> largest ends up on top
+    windows = [f"{w:.0f} days" if w is not None else "n/a"
+               for w in df["avg_window_days"]]
+
+    fig = go.Figure(go.Bar(
+        x=df["repost_count"], y=df["role"],
+        orientation="h",
+        marker_color=_ACCENT,
+        text=df["repost_count"], textposition="outside",
+        customdata=windows,
+        hovertemplate="%{y}<br>%{x} adverts · avg window %{customdata}<extra></extra>",
+    ))
+    fig.update_layout(
+        title="Most re-advertised roles (possible hard-to-fill)",
+        xaxis_title="Times advertised in window",
+        yaxis_title=None,
+        margin=dict(l=260),
+        bargap=0.3,
+    )
+    return _style_fig(fig)
+
+
+def international_destinations_bar(rows: list[dict]) -> go.Figure:
+    """Horizontal bar: top hiring cities among International postings.
+
+    Breaks the single 'International' map bucket back out by city so the real
+    geography (Dublin, Hong Kong, Singapore, …) is legible.
+    """
+    if not rows:
+        return _empty("No International postings with a city in this window")
+    df = pd.DataFrame(rows).sort_values("job_count")  # ascending -> biggest on top
+    fig = go.Figure(go.Bar(
+        x=df["job_count"], y=df["location"],
+        orientation="h",
+        marker_color=_POS,
+        text=df["job_count"], textposition="outside",
+        hovertemplate="%{y}: %{x} postings<extra></extra>",
+    ))
+    fig.update_layout(
+        title="Top international hiring cities",
+        xaxis_title="Postings", yaxis_title=None,
+        margin=dict(l=140),
+        bargap=0.3,
+    )
+    return _style_fig(fig)
+
+
 # Day-of-week order with Monday first; strftime('%w') is 0=Sun..6=Sat.
 _WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]
 _WEEKDAY_LABELS = {

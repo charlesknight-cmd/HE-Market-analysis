@@ -62,6 +62,8 @@ CASES = [
     ("application_window_by_discipline_bar", charts.application_window_by_discipline_bar, lambda: trends.application_window_by_discipline(days=max(LOOKBACK_DAYS, 90), min_n=10)),
     ("precarity_matrix_heatmap", charts.precarity_matrix_heatmap, lambda: trends.contract_hours_matrix(days=max(LOOKBACK_DAYS, 90))),
     ("deadline_pressure_bar", charts.deadline_pressure_bar, trends.deadline_urgency_buckets),
+    ("most_reposted_bar", charts.most_reposted_bar, lambda: trends.most_reposted_roles(days=180, limit=15)),
+    ("international_destinations_bar", charts.international_destinations_bar, lambda: trends.international_destinations(days=max(LOOKBACK_DAYS, 120), limit=15)),
 ]
 
 

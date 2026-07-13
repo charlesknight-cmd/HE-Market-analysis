@@ -1102,3 +1102,126 @@ def deadline_urgency_buckets() -> list[dict]:
     counts = {r["bucket"]: r["job_count"] for r in rows}
     order = ["0-3", "4-7", "8-14", "15-30", "30+"]
     return [{"bucket": b, "job_count": counts.get(b, 0)} for b in order]
+
+
+def most_reposted_roles(days: int = 180, limit: int = 15,
+                        min_reposts: int = 3) -> list[dict]:
+    """Roles re-advertised most often — a hard-to-fill / rolling-recruitment signal.
+
+    A "role" is an exact (title, institution) pair; each row in `jobs` is a
+    distinct advert (unique job_id), so COUNT(*) is the number of separate times
+    that role was advertised over the true-posting-date window. A role posted
+    many times is either genuinely hard to fill or run as rolling recruitment —
+    either way a market signal no other chart surfaces. Alongside the repost
+    count we carry the mean application window (closing_date − date_posted, in
+    days) so the builder can show how long each advert typically stays open;
+    AVG skips adverts missing either date. Exact-title matching is deliberately
+    conservative — it under-counts near-duplicates ("… (Fixed Term)") rather than
+    risk merging distinct roles. date_posted is 100%% filled (no _CLEAN_TS wrapper).
+
+    Returns rows of {title, institution, repost_count, avg_window_days} sorted by
+    repost_count descending, keeping only roles at or above `min_reposts`.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT title,
+                   institution,
+                   COUNT(*) AS repost_count,
+                   AVG(julianday(closing_date) - julianday(date_posted))
+                                                       AS avg_window_days
+            FROM jobs
+            WHERE date_posted IS NOT NULL
+              AND title IS NOT NULL
+              AND institution IS NOT NULL
+              AND date_posted >= date('now', :offset)
+            GROUP BY title, institution
+            HAVING repost_count >= :min_reposts
+            ORDER BY repost_count DESC, title ASC
+            LIMIT :limit
+            """,
+            {"offset": f"-{days} days", "min_reposts": min_reposts, "limit": limit},
+        ).fetchall()
+    return [{
+        "title":           r["title"],
+        "institution":     r["institution"],
+        "repost_count":    r["repost_count"],
+        "avg_window_days": round(r["avg_window_days"], 1)
+                           if r["avg_window_days"] is not None else None,
+    } for r in rows]
+
+
+def international_destinations(days: int = 180, limit: int = 15) -> list[dict]:
+    """Top hiring cities among International postings, over the posting-date window.
+
+    `region == 'International'` collapses everywhere-outside-the-UK into one
+    bucket on the map; this breaks that bucket back out by `location` (the
+    town/city parsed from each detail page) so the real geography — Dublin, Hong
+    Kong, Singapore, … — is visible. Rows without a location are dropped.
+    date_posted is 100%% filled, so it needs no _CLEAN_TS wrapper.
+
+    Returns rows of {location, job_count} sorted by count descending.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT location, COUNT(*) AS job_count
+            FROM jobs
+            WHERE region = 'International'
+              AND location IS NOT NULL
+              AND location != ''
+              AND date_posted >= date('now', :offset)
+            GROUP BY location
+            ORDER BY job_count DESC, location ASC
+            LIMIT :limit
+            """,
+            {"offset": f"-{days} days", "limit": limit},
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def scraper_health(hours: int = 24) -> dict:
+    """Operational health of the scraper from the scrape_runs log.
+
+    The scraper writes one scrape_runs row per discipline per run (≈21 rows a
+    run, runs hourly), so this summarises the last `hours` of that log into a
+    compact status the dashboard can surface for trust and breakage-spotting:
+    when we last ran, whether it succeeded, how many *new* jobs landed in the
+    window, and the most recent error (if any) so a silent failure is visible
+    rather than looking like a genuinely quiet market.
+
+    run_at is stored as a plain UTC 'YYYY-MM-DD HH:MM:SS' string, so it compares
+    directly against datetime('now'). Returns a dict; `last_run_at`/`last_status`
+    are None when the log is empty.
+    """
+    with get_connection() as conn:
+        last = conn.execute(
+            "SELECT run_at, status FROM scrape_runs ORDER BY run_at DESC LIMIT 1"
+        ).fetchone()
+        window = conn.execute(
+            """
+            SELECT COUNT(*)                                        AS runs,
+                   SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors,
+                   COALESCE(SUM(jobs_new), 0)                      AS new_jobs
+            FROM scrape_runs
+            WHERE run_at >= datetime('now', :offset)
+            """,
+            {"offset": f"-{hours} hours"},
+        ).fetchone()
+        last_error = conn.execute(
+            """
+            SELECT run_at, category, error
+            FROM scrape_runs
+            WHERE status = 'error' AND error IS NOT NULL
+            ORDER BY run_at DESC LIMIT 1
+            """
+        ).fetchone()
+    return {
+        "last_run_at":  last["run_at"] if last else None,
+        "last_status":  last["status"] if last else None,
+        "window_hours": hours,
+        "runs":         window["runs"] or 0,
+        "errors":       window["errors"] or 0,
+        "new_jobs":     window["new_jobs"] or 0,
+        "last_error":   dict(last_error) if last_error else None,
+    }

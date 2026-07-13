@@ -170,6 +170,56 @@ def test_weekday_cadence_empty():
     assert any("data" in (a.text or "").lower() for a in fig.layout.annotations)
 
 
+def test_most_reposted_bar_orders_largest_on_top():
+    """Horizontal bar: highest repost_count must land at the top (last in the
+    ascending-sorted y array Plotly draws bottom-up), and the avg window must
+    ride along in customdata for the hover."""
+    rows = [
+        {"title": "Research Assistant", "institution": "Oxford", "repost_count": 10, "avg_window_days": 18.9},
+        {"title": "Postdoc", "institution": "QMUL", "repost_count": 22, "avg_window_days": 21.0},
+    ]
+    fig = charts.most_reposted_bar(rows)
+    bar = fig.data[0]
+    assert bar.orientation == "h"
+    # Ascending sort => biggest count is the last element (top of the chart).
+    assert list(bar.x) == [10, 22]
+    assert "QMUL" in bar.y[-1] and "Postdoc" in bar.y[-1]
+    assert bar.customdata[-1] == "21 days"
+
+
+def test_most_reposted_bar_handles_missing_window():
+    """A role whose adverts never had both dates yields avg_window_days=None,
+    which must render as 'n/a' rather than crashing the hover formatter."""
+    rows = [{"title": "Fellow", "institution": "Leeds", "repost_count": 4, "avg_window_days": None}]
+    fig = charts.most_reposted_bar(rows)
+    assert fig.data[0].customdata[-1] == "n/a"
+
+
+def test_most_reposted_bar_empty():
+    fig = charts.most_reposted_bar([])
+    assert len(fig.data) == 0
+    assert any("data" in (a.text or "").lower() for a in fig.layout.annotations)
+
+
+def test_international_destinations_bar_orders_and_labels():
+    rows = [
+        {"location": "Dublin", "job_count": 46},
+        {"location": "Singapore", "job_count": 15},
+    ]
+    fig = charts.international_destinations_bar(rows)
+    bar = fig.data[0]
+    assert bar.orientation == "h"
+    # Biggest on top => last after ascending sort.
+    assert list(bar.y)[-1] == "Dublin"
+    assert list(bar.x)[-1] == 46
+
+
+def test_international_destinations_bar_empty_has_scoped_message():
+    fig = charts.international_destinations_bar([])
+    assert len(fig.data) == 0
+    assert any("international" in (a.text or "").lower() for a in fig.layout.annotations)
+
+
 def test_recruiter_concentration_curve_perfect_equality():
     """An even distribution should give Gini ~0 and a curve hugging the 45° line."""
     rows = [{"institution": f"Uni {i}", "job_count": 5} for i in range(10)]
