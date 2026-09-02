@@ -81,6 +81,13 @@ All notable changes to this project are recorded here. Format loosely follows
   metric-card hover respects `prefers-reduced-motion`.
 
 ### Fixed
+- **Database connections were never closed.** `db.schema.get_connection` is now
+  a context manager that closes the connection on exit (still committing on
+  success and rolling back on error). Previously every `with get_connection()`
+  block leaked two file descriptors on Python 3.14, so any long loop of per-row
+  writes — the discipline backfill died at ~500 jobs with "unable to open
+  database file" — would exhaust the 1024-fd limit. Every caller already used
+  the `with` form, so no call sites changed.
 - **Startup crash when no `secrets.toml` exists.** `st.secrets.get("password", "")`
   raises `StreamlitSecretNotFoundError` (not `KeyError`) when secrets are absent,
   so the default never applied and the app failed to load; now guarded.

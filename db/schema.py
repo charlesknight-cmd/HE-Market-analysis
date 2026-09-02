@@ -1,4 +1,6 @@
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from config import DB_PATH
@@ -152,12 +154,27 @@ _MIGRATIONS = [
 ]
 
 
-def get_connection() -> sqlite3.Connection:
+@contextmanager
+def get_connection() -> Iterator[sqlite3.Connection]:
+    """Open a connection for one unit of work: ``with get_connection() as conn:``.
+
+    Commits on a clean exit, rolls back on an exception (sqlite3's own context
+    manager), and always *closes* the connection afterwards. A bare
+    ``sqlite3.connect`` used as a context manager only commits — it never
+    closes — and on Python 3.14 the connection is not reclaimed when it goes
+    out of scope either, so every call leaked two file descriptors (db + WAL).
+    A long loop of per-job writes (the discipline backfill) hit the 1024-fd
+    limit after ~500 jobs with "unable to open database file".
+    """
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
