@@ -771,7 +771,11 @@ with t_data:
 
         mask = pd.Series([True] * len(df_all))
         if cat_filter:
-            mask &= df_all["category"].isin(cat_filter)
+            # `disciplines` holds every academic discipline the job is tagged
+            # with (comma-joined), so a multi-discipline job matches any of them.
+            wanted = set(cat_filter)
+            mask &= df_all["disciplines"].fillna("").apply(
+                lambda s: bool(wanted.intersection(s.split(","))))
         if inst_search:
             mask &= df_all["institution"].str.contains(inst_search, case=False, na=False)
         if salary_min_filter > 0:
@@ -780,14 +784,15 @@ with t_data:
         df_filtered = df_all[mask].copy()
         st.caption(f"Showing {len(df_filtered):,} of {len(df_all):,} jobs")
 
-        show_cols = ["title", "institution", "category", "region", "salary_raw",
+        show_cols = ["title", "institution", "disciplines", "region", "salary_raw",
                      "date_posted", "closing_date", "first_seen", "url"]
         df_display = df_filtered[show_cols].rename(columns={
-            "title": "Title", "institution": "Institution", "category": "Discipline",
+            "title": "Title", "institution": "Institution", "disciplines": "Discipline",
             "region": "Region", "salary_raw": "Salary", "date_posted": "Posted",
             "closing_date": "Closes", "first_seen": "First seen", "url": "URL",
         })
-        df_display["Discipline"] = df_display["Discipline"].map(category_label)
+        df_display["Discipline"] = df_display["Discipline"].fillna("").apply(
+            lambda s: ", ".join(category_label(c) for c in str(s).split(",") if c))
 
         st.dataframe(
             df_display, hide_index=True, width='stretch',

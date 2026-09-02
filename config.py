@@ -13,7 +13,10 @@ SEARCH_BASE = "https://www.jobs.ac.uk/search"
 DISCIPLINE_FACET = "academicDisciplineFacet[]"
 
 # The 21 subject disciplines jobs.ac.uk exposes (slug -> display name). A job may
-# appear under more than one; it is stored under whichever is scraped first.
+# be tagged with several: `jobs.category` records only the facet it was scraped
+# under first, while the `job_disciplines` table (fed by every listing scan and
+# by the detail page's Subject Area(s) block) holds the full set — discipline
+# analytics read the `jobs_by_discipline` view, not `jobs.category`.
 DISCIPLINES = {
     "agriculture-food-and-veterinary":         "Agriculture, Food & Veterinary",
     "architecture-building-and-planning":      "Architecture, Building & Planning",

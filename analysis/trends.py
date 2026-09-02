@@ -10,6 +10,13 @@ from db.schema import get_connection
 _CLEAN_TS      = "substr(replace(first_seen, 'T', ' '), 1, 19)"
 _CLEAN_LAST_TS = "substr(replace(last_seen,  'T', ' '), 1, 19)"
 
+# Discipline-level queries read from the views in db/schema.py rather than the
+# jobs table: `jobs_by_discipline` has one row per job x academic discipline
+# (so a job tagged with three disciplines counts under each), and
+# `jobs_primary_discipline` has exactly one row per job labelled with its
+# first-listed discipline (for per-job distributions that must not double count).
+# `jobs.category` alone only records the facet a job was first scraped under.
+
 _STOPWORDS = {
     'a', 'an', 'the', 'of', 'in', 'for', 'and', 'at', 'to', 'with', 'on',
     'by', 'or', 'is', 'are', 'be', 'from', 'as', 'into', 'its', 'this',
@@ -34,7 +41,7 @@ def category_weekly_counts(weeks: int = 12) -> list[dict]:
                 strftime('%Y-W%W', {_CLEAN_TS}) AS week,
                 category,
                 COUNT(*)                          AS job_count
-            FROM jobs
+            FROM jobs_by_discipline
             WHERE {_CLEAN_TS} >= datetime('now', :offset)
             GROUP BY week, category
             ORDER BY week, category
@@ -45,7 +52,11 @@ def category_weekly_counts(weeks: int = 12) -> list[dict]:
 
 
 def category_share_over_time(weeks: int = 16) -> list[dict]:
-    """Weekly category share as a percentage of all postings that week."""
+    """Weekly category share as a percentage of all discipline tags that week.
+
+    A job tagged with several disciplines contributes to each, so the
+    denominator is the number of tags, not jobs - shares still sum to 100.
+    """
     rows = category_weekly_counts(weeks=weeks)
     if not rows:
         return []
@@ -99,7 +110,7 @@ def monthly_postings(months: int = 12) -> list[dict]:
                 strftime('%Y-%m', {_CLEAN_TS}) AS month,
                 category,
                 COUNT(*)                        AS job_count
-            FROM jobs
+            FROM jobs_by_discipline
             WHERE {_CLEAN_TS} >= datetime('now', :offset)
             GROUP BY month, category
             ORDER BY month, category
@@ -120,7 +131,7 @@ def salary_by_month(months: int = 12) -> list[dict]:
                 category,
                 ROUND(AVG(salary_min), 0)       AS avg_salary_min,
                 COUNT(*)                        AS n
-            FROM jobs
+            FROM jobs_by_discipline
             WHERE salary_min IS NOT NULL
               AND {_CLEAN_TS} >= datetime('now', :offset)
             GROUP BY month, category
@@ -143,7 +154,7 @@ def salary_trends_by_category(weeks: int = 12) -> list[dict]:
                 ROUND(AVG(salary_min), 0)         AS avg_salary_min,
                 ROUND(AVG(salary_max), 0)         AS avg_salary_max,
                 COUNT(*)                          AS n
-            FROM jobs
+            FROM jobs_by_discipline
             WHERE salary_min IS NOT NULL
               AND {_CLEAN_TS} >= datetime('now', :offset)
             GROUP BY week, category
@@ -351,7 +362,7 @@ def overall_summary() -> dict:
             f"SELECT COUNT(*) FROM jobs WHERE {_CLEAN_TS} >= datetime('now', '-30 days')"
         ).fetchone()[0]
         categories = conn.execute(
-            "SELECT COUNT(DISTINCT category) FROM jobs"
+            "SELECT COUNT(DISTINCT category) FROM jobs_by_discipline"
         ).fetchone()[0]
         institutions = conn.execute(
             "SELECT COUNT(DISTINCT institution) FROM jobs WHERE institution IS NOT NULL"
@@ -374,7 +385,7 @@ def seasonal_heatmap_data() -> list[dict]:
                 strftime('%m', {_CLEAN_TS}) AS month_num,
                 category,
                 COUNT(*)                    AS job_count
-            FROM jobs
+            FROM jobs_by_discipline
             GROUP BY month_num, category
             ORDER BY month_num, category
             """
@@ -490,7 +501,7 @@ def keyword_salary_premiums(days: int = 90, min_occurrences: int = 2) -> list[di
         rows = conn.execute(
             f"""
             SELECT title, salary_min, category
-            FROM jobs
+            FROM jobs_primary_discipline
             WHERE salary_min IS NOT NULL
               AND {_CLEAN_TS} >= datetime('now', :offset)
             """,
@@ -590,7 +601,7 @@ def salary_distribution(days: int = 90) -> list[dict]:
         rows = conn.execute(
             f"""
             SELECT salary_min, category
-            FROM jobs
+            FROM jobs_primary_discipline
             WHERE salary_min IS NOT NULL
               AND {_CLEAN_TS} >= datetime('now', :offset)
             """,
@@ -807,7 +818,7 @@ def region_category_matrix(days: int = 180) -> list[dict]:
         rows = conn.execute(
             f"""
             SELECT region, category, COUNT(*) AS job_count
-            FROM jobs
+            FROM jobs_by_discipline
             WHERE region IS NOT NULL
               AND {_CLEAN_TS} >= datetime('now', :offset)
             GROUP BY region, category
@@ -907,7 +918,7 @@ def salary_disclosure_by_group(days: int = 120) -> list[dict]:
                 'discipline' AS dim,
                 COUNT(*) AS n,
                 SUM(CASE WHEN salary_min IS NULL THEN 1 ELSE 0 END) AS undisclosed
-            FROM jobs
+            FROM jobs_by_discipline
             WHERE date_posted >= date('now', :offset)
               AND category IS NOT NULL
               AND category != ''
@@ -1031,7 +1042,7 @@ def fixed_term_share_by_discipline(days: int = 180, min_n: int = 40) -> list[dic
                     SUM(CASE WHEN contract_type = 'fixed-term' THEN 1 ELSE 0 END)
                     * 100.0 / COUNT(*), 1
                 )                                                              AS fixed_term_pct
-            FROM jobs
+            FROM jobs_by_discipline
             WHERE contract_type IN ('permanent', 'fixed-term')
               AND date_posted >= date('now', :offset)
             GROUP BY category
@@ -1057,9 +1068,9 @@ def application_window_by_discipline(days: int = 180, min_n: int = 10) -> list[d
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT category,
+            SELECT job_id, category,
                    julianday(closing_date) - julianday(date_posted) AS window_days
-            FROM jobs
+            FROM jobs_by_discipline
             WHERE closing_date IS NOT NULL
               AND date_posted IS NOT NULL
               AND category IS NOT NULL
@@ -1070,10 +1081,11 @@ def application_window_by_discipline(days: int = 180, min_n: int = 10) -> list[d
         ).fetchall()
 
     by_cat: dict[str, list] = defaultdict(list)
-    all_windows: list[float] = []
+    per_job: dict[str, float] = {}   # a multi-discipline job counts once in the market median
     for r in rows:
         by_cat[r["category"]].append(r["window_days"])
-        all_windows.append(r["window_days"])
+        per_job[r["job_id"]] = r["window_days"]
+    all_windows = list(per_job.values())
 
     if not all_windows:
         return []

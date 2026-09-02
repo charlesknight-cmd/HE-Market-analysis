@@ -26,7 +26,8 @@ One row per unique listing, keyed by `job_id`.
 | `region` | TEXT | detail-page JSON-LD (`addressRegion`/country) | enriched | UK nation (England/Scotland/Wales/Northern Ireland), `International`, or `UK (unspecified)`. The listing gives only a town, so region is still derived by enrichment. |
 | `date_posted` | TEXT (YYYY-MM-DD) | listing (`Date Placed:`), year inferred | ~100% | Advertised posting date, from the card. Drives the recruitment-window calc (`closing_date − date_posted`). Enrichment confirms it from JSON-LD `datePosted`. |
 | `enriched_at` | TEXT (ISO-8601 UTC) | enrichment | enriched | When the job was enriched. NULL ⇒ not yet processed (will be picked up next run). |
-| `category` | TEXT | discipline facet slug | 100% | Subject discipline the job was scraped under (see `config.DISCIPLINES`), e.g. `computer-sciences`. A job may span disciplines; it's stored under the first one scraped. Rows from before the 2026-06-09 taxonomy change hold a legacy job-type slug (`academic-or-research`, …) and age out. |
+| `disciplines_at` | TEXT (ISO-8601 UTC) | enrichment / `scripts.backfill_disciplines` | enriched | When the detail page's Subject Area(s) were captured into `job_disciplines`. NULL ⇒ pending backfill. |
+| `category` | TEXT | discipline facet slug | 100% | **The discipline facet the job was first scraped under — not its full set of disciplines.** A job tagged with several disciplines (common: ~2 in 3 STEM jobs) keeps only the first-scanned one here. Use `job_disciplines` / the `jobs_by_discipline` view for attribution; treat this column as provenance. Rows from before the 2026-06-09 taxonomy change hold a legacy job-type slug (`academic-or-research`, …). |
 | `url` | TEXT | listing (card title link) | 100% | Canonical listing URL; also the detail page fetched for enrichment. |
 | `first_seen` | TEXT (ISO-8601 UTC) | scraper | 100% | When this job_id was first observed. Drives all "new jobs over time" charts. |
 | `last_seen` | TEXT (ISO-8601 UTC) | scraper | 100% | Updated every scrape the job still appears. `last_seen - first_seen` ⇒ listing longevity. |
@@ -39,6 +40,44 @@ One row per unique listing, keyed by `job_id`.
 > listing and are recovered from the schema.org `JobPosting` JSON-LD on each detail
 > page — see [detail-page-enrichment.md](detail-page-enrichment.md). The daily scrape
 > enriches up to 200 new jobs; `python -m scripts.enrich_backfill` clears any backlog.
+
+## Table: `job_disciplines`
+
+One row per (job, subject-area tag). jobs.ac.uk tags each job with any number of
+**academic disciplines** (the 21 facets we scrape), their **sub-disciplines**
+(e.g. `artificial-intelligence` under `computer-sciences`) and **non-academic
+disciplines** (e.g. `student-services`). The detail page lists them all in its
+"Subject Area(s)" sidebar; every listing scan also contributes the facet it ran
+under. This table — not `jobs.category` — is the source of truth for
+discipline attribution.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `job_id` | TEXT | FK to `jobs.job_id`. |
+| `facet` | TEXT | `academic` / `sub` / `non-academic`. Primary key with `job_id` + `slug`. |
+| `slug` | TEXT | Facet value, e.g. `computer-sciences`, `artificial-intelligence`. |
+| `name` | TEXT | Display name from the detail page. NULL when recovered from an expired-job redirect. |
+| `parent_slug` | TEXT | For `sub` rows: the academic discipline it belongs to (NULL if unknowable from a redirect with several academic facets). |
+| `source` | TEXT | `listing` (facet scan) < `redirect` (expired-job redirect URL) < `detail` (Subject Area(s) block). Upserts only ever raise authority. |
+| `position` | INTEGER | Order on the detail page within the facet (0 = first-listed). NULL for listing-sourced rows. |
+| `first_seen` / `last_seen` | TEXT (ISO-8601 UTC) | When the tag was first/last observed. |
+
+**Coverage.** New jobs get their tags during the daily enrichment. Historic rows
+are filled by `python -m scripts.backfill_disciplines` (newest-closing first):
+jobs.ac.uk serves a full detail page for ~45 days after closing, then a
+redirect to `/search/?academicDisciplineFacet[0]=…&expired-job-redirect=true`
+that still names the facets, so every job is recoverable — older ones just
+lack display names and sub-discipline parents. `--status` prints coverage.
+
+### Views
+
+| View | Rows | Use for |
+|------|------|---------|
+| `jobs_by_discipline` | one per job × academic discipline (`category` = that discipline; `position` = page order). Jobs with no `job_disciplines` row yet fall back to `jobs.category`, so it is never emptier than `jobs`. | Anything grouped by discipline: counts, shares, salary by discipline, casualisation, application windows. A multi-discipline job counts under each. |
+| `jobs_primary_discipline` | exactly one per job (`category` = first-listed academic discipline, else `jobs.category`). | Per-job distributions that must not double count but still want a discipline label (salary histogram, keyword-premium baselines). |
+
+Both views are (re)created by `init_db()` whenever their SQL changes, and pass
+every `jobs` column through, so a later column migration is picked up automatically.
 
 ## Table: `scrape_runs`
 
@@ -66,7 +105,16 @@ postings); the long tail (Agriculture, Sport & Leisure, …) runs to a few dozen
 
 Rows scraped before that date carry a **legacy job-type slug** (`academic-or-research`,
 `professional-or-managerial`, `further-education`, …) from the retired feed
-taxonomy and are not re-categorised; they age out as those listings expire.
+taxonomy in `category`; once the discipline backfill has run they carry proper
+discipline tags in `job_disciplines` and appear under those in `jobs_by_discipline`.
+
+**Multi-discipline jobs.** A job can be tagged with several of the 21
+disciplines, so discipline counts in the dashboard sum to more than the number
+of jobs, and "share" charts are shares of discipline *tags*. Before this was
+tracked (September 2026) each job was attributed to whichever facet the scraper
+happened to scan first — alphabetical order, which inflated `agriculture…` and
+`biological-sciences` and starved later ones. Any discipline-level figure in
+`jobs.category` alone is subject to that bias; use the view.
 
 ## Chart catalogue
 

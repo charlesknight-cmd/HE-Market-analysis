@@ -63,6 +63,11 @@ on either entry point.
   SQL helper (`substr(replace(first_seen,'T',' '),1,19)`) so `strftime` works across
   both `T`-separated and space-separated values.
 - Indexes on `institution`, `category`, `first_seen`, `last_seen`, `contract_type`, `hours`.
+- `job_disciplines` — one row per (job, subject-area tag): the academic disciplines a
+  job is tagged with (often more than one), plus sub- and non-academic disciplines,
+  captured from each detail page. Views `jobs_by_discipline` (job × discipline) and
+  `jobs_primary_discipline` (one row per job) sit over it; discipline-level analytics
+  read those rather than `jobs.category`, which only records the facet scanned first.
 
 ## Caching
 

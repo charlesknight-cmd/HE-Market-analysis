@@ -6,6 +6,21 @@ All notable changes to this project are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- **Multi-discipline attribution.** A job on jobs.ac.uk can be tagged with
+  several of the 21 subject disciplines, but `jobs.category` only ever held the
+  facet the scraper scanned first (alphabetical), which skewed every
+  discipline-level chart. New `job_disciplines` table stores every tag — the 21
+  academic disciplines, their sub-disciplines and the non-academic disciplines —
+  captured from the detail page's "Subject Area(s)" block during enrichment
+  (`scraper.detail.parse_subject_areas`), from the expired-job redirect URL for
+  jobs whose page has aged out (`parse_redirect_disciplines`), and from every
+  listing scan a job turns up in. Two views, `jobs_by_discipline` (one row per
+  job × discipline) and `jobs_primary_discipline` (one row per job, first-listed
+  discipline), replace `FROM jobs` in the discipline queries. `python -m
+  scripts.backfill_disciplines` fills historic rows (newest-closing first;
+  `--status` for coverage). The raw-jobs table filter now matches any of a job's
+  disciplines. `tests/test_disciplines.py` covers the parsers, the upsert
+  authority order, the views and the query helpers.
 - **Nine new charts** exploiting the now ~3-month `date_posted` history and the
   high enrichment fill rates (closing_date/location/date_posted ~100%,
   contract/hours/region ~96%):
@@ -48,6 +63,16 @@ All notable changes to this project are recorded here. Format loosely follows
 - Unit tests: `tests/test_stemming.py`, `tests/test_labels.py`.
 
 ### Changed
+- Discipline-level analytics (weekly/monthly counts, share, growth, salary by
+  discipline, seasonality heatmap, region × discipline, disclosure gap,
+  casualisation, days-to-apply, institution discipline counts and spike lists)
+  now count a multi-discipline job under each of its disciplines; "share" is
+  share of discipline tags. Per-job distributions (salary histogram,
+  keyword-premium baselines) use the job's first-listed discipline instead of
+  the first-scanned facet. Institution spike counts are distinct jobs, not tags.
+- `enrich_url` returns `disciplines`, `discipline_source` and `expired`
+  alongside the JSON-LD fields; `fetch_detail_page` exposes the final URL so an
+  expired-job redirect can be recognised.
 - Chart titles and axis labels are now uniformly sentence-case.
 - "Categories" → "Disciplines" in the KPI, tables and filters (post-migration term).
 - The "Other / Unclassified" seniority bar is muted so the non-answer stops

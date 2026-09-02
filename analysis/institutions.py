@@ -15,7 +15,10 @@ def top_institutions(days: int = 30, limit: int = 20) -> list[dict]:
             SELECT
                 institution,
                 COUNT(*)                         AS job_count,
-                COUNT(DISTINCT category)         AS categories,
+                (SELECT COUNT(DISTINCT v.category) FROM jobs_by_discipline v
+                 WHERE v.institution = jobs.institution
+                   AND substr(replace(v.first_seen, 'T', ' '), 1, 19) >= datetime('now', :offset)
+                )                                AS categories,
                 ROUND(AVG(salary_min), 0)        AS avg_salary_min
             FROM jobs
             WHERE {_CLEAN_TS} >= datetime('now', :offset)
@@ -58,7 +61,7 @@ def institution_category_breakdown(days: int = 30) -> list[dict]:
                 institution,
                 category,
                 COUNT(*) AS job_count
-            FROM jobs
+            FROM jobs_by_discipline
             WHERE {_CLEAN_TS} >= datetime('now', :offset)
               AND institution IS NOT NULL
             GROUP BY institution, category
@@ -76,10 +79,10 @@ def spike_candidates(days: int = 7, threshold: int = 3) -> list[dict]:
             f"""
             SELECT
                 institution,
-                COUNT(*)                        AS job_count,
+                COUNT(DISTINCT job_id)          AS job_count,
                 COUNT(DISTINCT category)        AS categories,
                 GROUP_CONCAT(DISTINCT category) AS category_list
-            FROM jobs
+            FROM jobs_by_discipline
             WHERE {_CLEAN_TS} >= datetime('now', :offset)
               AND institution IS NOT NULL
             GROUP BY institution

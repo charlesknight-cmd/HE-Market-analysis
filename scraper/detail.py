@@ -9,10 +9,12 @@ robots.txt (checked 2026-06-02) allows /job/ pages. Be polite: fetch sequentiall
 with a delay and only for jobs that aren't already enriched.
 """
 
+import html as _html
 import json
 import re
 import time
 from datetime import datetime, timezone
+from urllib.parse import parse_qsl, urlsplit
 
 import requests
 
@@ -31,16 +33,166 @@ _UK_COUNTRIES = {
 }
 
 
-def fetch_detail(url: str, session: requests.Session | None = None,
-                 timeout: int = 20) -> str | None:
-    """Return the detail-page HTML, or None on any network/HTTP error."""
+def fetch_detail_page(url: str, session: requests.Session | None = None,
+                      timeout: int = 20) -> tuple[str, str] | None:
+    """Return (html, final_url) for a detail page, or None on any network/HTTP error.
+
+    final_url matters: ~45 days after closing, jobs.ac.uk 302s an expired job to
+    a /search/ page whose query string carries the job's discipline facets.
+    """
     getter = session or requests
     try:
         resp = getter.get(url, headers=REQUEST_HEADERS, timeout=timeout)
         resp.raise_for_status()
-        return resp.text
+        return resp.text, resp.url
     except requests.RequestException:
         return None
+
+
+def fetch_detail(url: str, session: requests.Session | None = None,
+                 timeout: int = 20) -> str | None:
+    """Return the detail-page HTML, or None on any network/HTTP error."""
+    page = fetch_detail_page(url, session=session, timeout=timeout)
+    return page[0] if page else None
+
+
+# --- Subject areas (discipline tags) -----------------------------------------
+#
+# The detail page's sidebar lists every subject area a job is tagged with as a
+# run of small GET forms, one per tag, each carrying the facet params as hidden
+# inputs plus a submit button whose value is the display name:
+#
+#   <p><b>Subject Area(s):</b></p>
+#   <form ...><input name="academicDisciplineFacet[0]" value="economics" type="hidden">
+#             <input class="parent-category" type="submit" value="Economics"></form>
+#   <form ...><input name="academicDisciplineFacet[0]" value="social-sciences-and-social-care" type="hidden">
+#             <input name="subDisciplineFacet[0]" value="social-policy" type="hidden">
+#             <input class="" type="submit" value="Social Policy"></form>
+#   <form ...><input name="nonAcademicDisciplineFacet[0]" value="student-services" type="hidden">
+#             <input class="parent-category" type="submit" value="Student Services"></form>
+#   <p><b>Location(s):</b></p>
+#
+# Some pages also embed the same data as JSON (`"subjectAreas": [...]`), but not
+# all do, so the form block is the one we parse.
+
+_SUBJECT_BLOCK_RE = re.compile(
+    r"Subject\s+Area\(s\):(.*?)(?:<p><b>[A-Z][^<]{0,40}:</b>|$)",
+    re.DOTALL | re.IGNORECASE,
+)
+_FORM_RE = re.compile(r"<form\b[^>]*>(.*?)</form>", re.DOTALL | re.IGNORECASE)
+_INPUT_RE = re.compile(r"<input\b([^>]*)>", re.IGNORECASE)
+_ATTR_RE = re.compile(r"""([\w\[\]:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+
+_FACET_KINDS = {
+    "academicDisciplineFacet":    "academic",
+    "subDisciplineFacet":         "sub",
+    "nonAcademicDisciplineFacet": "non-academic",
+}
+_FACET_KEY_RE = re.compile(
+    r"^(academicDisciplineFacet|subDisciplineFacet|nonAcademicDisciplineFacet)(?:\[\d*\])?$"
+)
+
+
+def _input_attrs(tag_body: str) -> dict[str, str]:
+    return {m.group(1): _html.unescape(m.group(2) if m.group(2) is not None else (m.group(3) or ""))
+            for m in _ATTR_RE.finditer(tag_body)}
+
+
+def _facet_kind(param_name: str) -> str | None:
+    m = _FACET_KEY_RE.match(param_name or "")
+    return _FACET_KINDS[m.group(1)] if m else None
+
+
+def _classify(facets: dict[str, str], name: str | None) -> dict | None:
+    """Turn one form's facet params into a single {facet, slug, name, parent_slug} tag.
+
+    A form with a sub-discipline param is that sub-discipline (its academic param
+    is the parent). Otherwise it's the academic or non-academic discipline named.
+    """
+    if facets.get("sub"):
+        return {"facet": "sub", "slug": facets["sub"], "name": name,
+                "parent_slug": facets.get("academic")}
+    for kind in ("academic", "non-academic"):
+        if facets.get(kind):
+            return {"facet": kind, "slug": facets[kind], "name": name, "parent_slug": None}
+    return None
+
+
+def _dedupe_with_positions(tags: list[dict]) -> list[dict]:
+    """Drop repeat (facet, slug) pairs and number each facet's tags 0.. in page order."""
+    seen: set[tuple[str, str]] = set()
+    counters: dict[str, int] = {}
+    out = []
+    for t in tags:
+        key = (t["facet"], t["slug"])
+        if key in seen:
+            continue
+        seen.add(key)
+        t["position"] = counters.get(t["facet"], 0)
+        counters[t["facet"]] = t["position"] + 1
+        out.append(t)
+    return out
+
+
+def parse_subject_areas(html: str) -> list[dict]:
+    """Extract the job's subject-area tags from detail-page HTML.
+
+    Returns [{facet, slug, name, parent_slug, position}, ...] in page order -
+    facet is 'academic' (one of the 21 discipline facets we scrape), 'sub'
+    (with parent_slug set to its academic discipline) or 'non-academic'. Empty
+    list if the page has no Subject Area(s) block.
+    """
+    m = _SUBJECT_BLOCK_RE.search(html or "")
+    if not m:
+        return []
+    tags = []
+    for form_body in _FORM_RE.findall(m.group(1)):
+        facets: dict[str, str] = {}
+        name = None
+        for tag_body in _INPUT_RE.findall(form_body):
+            attrs = _input_attrs(tag_body)
+            kind = _facet_kind(attrs.get("name", ""))
+            if kind and attrs.get("value"):
+                facets[kind] = attrs["value"].strip()
+            elif attrs.get("type", "").lower() == "submit" and attrs.get("value"):
+                name = attrs["value"].strip() or None
+        tag = _classify(facets, name)
+        if tag:
+            tags.append(tag)
+    return _dedupe_with_positions(tags)
+
+
+def is_expired_redirect(final_url: str | None) -> bool:
+    """True if a detail-page fetch landed on the expired-job search redirect."""
+    if not final_url:
+        return False
+    parts = urlsplit(final_url)
+    return parts.path.rstrip("/").endswith("/search") or "expired-job-redirect=true" in parts.query
+
+
+def parse_redirect_disciplines(final_url: str) -> list[dict]:
+    """Recover discipline tags from an expired-job redirect URL.
+
+    The redirect target looks like
+      /search/?academicDisciplineFacet[0]=law&subDisciplineFacet[0]=criminal-law
+              &nonAcademicDisciplineFacet[0]=student-services&...&expired-job-redirect=true
+    Display names aren't available, and a sub-discipline can't be tied to its
+    parent when several academic facets are present, so parent_slug is only set
+    when exactly one academic discipline is named.
+    """
+    if not final_url:
+        return []
+    tags = []
+    for key, value in parse_qsl(urlsplit(final_url).query, keep_blank_values=False):
+        kind = _facet_kind(key)
+        if kind and value.strip():
+            tags.append({"facet": kind, "slug": value.strip(), "name": None, "parent_slug": None})
+    academics = [t["slug"] for t in tags if t["facet"] == "academic"]
+    if len(academics) == 1:
+        for t in tags:
+            if t["facet"] == "sub":
+                t["parent_slug"] = academics[0]
+    return _dedupe_with_positions(tags)
 
 
 def _extract_jobposting(html: str) -> dict | None:
@@ -164,11 +316,22 @@ def parse_detail(html: str) -> dict:
 
 
 def enrich_url(url: str, session: requests.Session | None = None) -> dict | None:
-    """Fetch and parse one detail page. None if the page couldn't be fetched."""
-    html = fetch_detail(url, session=session)
-    if html is None:
+    """Fetch and parse one detail page. None if the page couldn't be fetched.
+
+    Returns parse_detail's fields plus `disciplines` (see parse_subject_areas),
+    `discipline_source` ('detail' or 'redirect') and `expired` (True when the
+    site redirected to search because the job has aged out - no JobPosting
+    fields are available then, only the disciplines encoded in the redirect).
+    """
+    page = fetch_detail_page(url, session=session)
+    if page is None:
         return None
-    return parse_detail(html)
+    html, final_url = page
+    if is_expired_redirect(final_url):
+        return {**_EMPTY_DETAIL, "disciplines": parse_redirect_disciplines(final_url),
+                "discipline_source": "redirect", "expired": True}
+    return {**parse_detail(html), "disciplines": parse_subject_areas(html),
+            "discipline_source": "detail", "expired": False}
 
 
 def _now() -> str:

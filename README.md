@@ -35,7 +35,7 @@ scraper/             Listing fetching and parsing
   run.py               CLI entry point (one-shot or --daemon)
 db/                  Persistence
   schema.py            Schema, WAL, idempotent migrations, indexes
-  queries.py           upsert / bulk_upsert / get_all_jobs / get_jobs_since / log_run
+  queries.py           upsert / bulk_upsert / get_all_jobs / get_jobs_since / log_run / job_disciplines helpers
 analysis/            Read-only analytics over the DB
   trends.py            Time-series + statistical queries (the bulk of the analytics)
   institutions.py      Institution-level queries (top recruiters, spikes, churn)
@@ -44,7 +44,7 @@ analysis/            Read-only analytics over the DB
 dashboard/           Streamlit UI
   app.py               Page layout, tabs, filters, cached loaders
   charts.py            Reusable Plotly figure builders + shared styling
-scripts/             One-off maintenance scripts (e.g. reparse.py salary backfill)
+scripts/             One-off maintenance scripts (reparse.py salary backfill, backfill_disciplines.py, enrich_backfill.py, backup_db.py)
 tests/               pytest suite (parser tests)
 deploy/              systemd unit, nginx config, setup script
 docs/                Design notes & reference (architecture, data dictionary, enrichment scope)
@@ -105,6 +105,10 @@ https://jobs.charlesknight.co.uk.
 - **Dashboard:** `he-market-dashboard.service` (systemd) runs `streamlit run dashboard/app.py`.
 - **Scrape:** a cron job runs `python -m scraper.run` daily at 07:00 UTC.
 - **Code path:** `/opt/he-market-analysis`.
+- **Discipline tags:** new jobs get their full set of subject disciplines during
+  the daily enrichment. After deploying a schema change, or to fill historic
+  rows, run `python -m scripts.backfill_disciplines` (about one request per
+  second; `--status` shows coverage without fetching).
 
 Deploy a change:
 
