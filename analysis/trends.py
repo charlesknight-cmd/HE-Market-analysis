@@ -4,6 +4,7 @@ import re
 import math
 from collections import Counter, defaultdict
 
+from config import LEGACY_JOB_TYPE_SLUGS
 from db.schema import get_connection
 
 # SQLite helper: strip timezone suffix so strftime works on both old and new timestamps
@@ -1287,3 +1288,101 @@ def scraper_health(hours: int = 24) -> dict:
         "new_jobs":     window["new_jobs"] or 0,
         "last_error":   dict(last_error) if last_error else None,
     }
+
+
+# --- Recruitment mix: research vs lecturer posts, and the precarity it implies ---
+
+# Title keywords that mark a research post vs a lecturer post (any grade).
+_RESEARCH_TITLE_RE = re.compile(r"research (?:fellow|associate|assistant)|postdoc", re.IGNORECASE)
+_LECTURER_TITLE_RE = re.compile(r"lecturer", re.IGNORECASE)
+
+# A discipline whose research-posts-per-lecturer-post ratio sits inside this band
+# is "balanced" — neither research- nor teaching-heavy — so a ratio near 1.0 is
+# never forced to a side.
+BALANCED_BAND = (0.8, 1.25)
+
+
+def role_flags(title: str | None) -> tuple[bool, bool]:
+    """(is_research_post, is_lecturer_post) from a job title."""
+    t = title or ""
+    return bool(_RESEARCH_TITLE_RE.search(t)), bool(_LECTURER_TITLE_RE.search(t))
+
+
+def mix_label(res_per_lec: float | None) -> str:
+    """'research' | 'balanced' | 'teaching' from the research-posts-per-lecturer-post ratio.
+
+    None (no lecturer posts advertised) reads as teaching-heavy only in the
+    degenerate no-research case; with any research posts it's research-heavy.
+    """
+    if res_per_lec is None:
+        return "teaching"
+    lo, hi = BALANCED_BAND
+    if res_per_lec > hi:
+        return "research"
+    if res_per_lec < lo:
+        return "teaching"
+    return "balanced"
+
+
+def recruitment_mix_by_discipline(days: int = 180, min_n: int = 40) -> list[dict]:
+    """Per-discipline fixed-term share alongside its research:lecturer recruitment mix.
+
+    Over the true-posting-date window, for each academic discipline (via
+    `jobs_by_discipline`, so a multi-discipline advert counts under each) count
+    research posts and lecturer posts from titles, and the fixed-term share of
+    adverts stating a contract type. Disciplines with fewer than `min_n` such
+    contracted adverts are dropped, as are legacy job-type slugs. `market_pct`
+    (the all-adverts fixed-term share, counting each job once) is carried on
+    every row so the builder can draw one reference line.
+
+    Returns rows of {category, n, fixed_term, fixed_term_pct, research, lecturer,
+    res_per_lec (None if no lecturer posts), mix, market_pct}, sorted ascending
+    by fixed_term_pct.
+    """
+    offset = f"-{days} days"
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT category, title, contract_type
+            FROM jobs_by_discipline
+            WHERE date_posted >= date('now', :offset)
+              AND category IS NOT NULL
+            """,
+            {"offset": offset},
+        ).fetchall()
+        contracted, fixed_all = conn.execute(
+            """
+            SELECT SUM(contract_type IN ('permanent', 'fixed-term')),
+                   SUM(contract_type = 'fixed-term')
+            FROM jobs
+            WHERE date_posted >= date('now', :offset)
+            """,
+            {"offset": offset},
+        ).fetchone()
+
+    market_pct = round(100 * (fixed_all or 0) / contracted, 1) if contracted else 0.0
+    per: dict[str, dict] = {}
+    for r in rows:
+        if r["category"] in LEGACY_JOB_TYPE_SLUGS:
+            continue
+        d = per.setdefault(r["category"], {"n": 0, "fixed_term": 0, "research": 0, "lecturer": 0})
+        if r["contract_type"] in ("permanent", "fixed-term"):
+            d["n"] += 1
+            d["fixed_term"] += r["contract_type"] == "fixed-term"
+        res, lec = role_flags(r["title"])
+        d["research"] += res
+        d["lecturer"] += lec
+
+    result = []
+    for cat, d in per.items():
+        if d["n"] < min_n:
+            continue
+        ratio = round(d["research"] / d["lecturer"], 2) if d["lecturer"] else (None if not d["research"] else float("inf"))
+        result.append({
+            "category": cat, **d,
+            "fixed_term_pct": round(100 * d["fixed_term"] / d["n"], 1),
+            "res_per_lec": ratio,
+            "mix": mix_label(ratio),
+            "market_pct": market_pct,
+        })
+    return sorted(result, key=lambda x: x["fixed_term_pct"])

@@ -1816,3 +1816,64 @@ def deadline_pressure_bar(rows: list[dict]) -> go.Figure:
         showlegend=False,
     )
     return _style_fig(fig)
+
+
+# Recruitment-mix bands for the precarity chart. Research-heavy takes the accent,
+# teaching-heavy an Okabe-Ito orange (CVD-safe against the accent blue), and the
+# balanced band the de-emphasis grey — a boundary case, deliberately not a third hue.
+_MIX_COLOURS = {"research": _ACCENT, "balanced": _OTHER_COLOUR, "teaching": "#E69F00"}
+_MIX_NAMES = {
+    "research": "Research-heavy (more research posts than lecturer posts)",
+    "balanced": "Balanced (about one research post per lecturer post)",
+    "teaching": "Teaching-heavy (more lecturer posts than research posts)",
+}
+
+
+def precarity_mix_bar(rows: list[dict]) -> go.Figure:
+    """Horizontal bars: fixed-term share per discipline, coloured by recruitment mix.
+
+    The "precarity is a discipline story" chart. Each discipline's fixed-term
+    share is a bar from zero (least casualised at the bottom), coloured by
+    whether the discipline advertises more research posts than lecturer posts
+    (research-heavy), fewer (teaching-heavy) or about the same (balanced) — the
+    mix that explains most of the spread. The all-adverts fixed-term share is a
+    solid reference line; the research-posts-per-lecturer-post ratio and the
+    sample size ride on hover. One trace per band so the legend is the identity
+    channel; `barmode='overlay'` keeps a single bar per discipline.
+    """
+    if not rows:
+        return _empty()
+    df = pd.DataFrame(rows).sort_values("fixed_term_pct")
+    df["label"] = df["category"].map(_label)
+    df["ratio_txt"] = df["res_per_lec"].apply(
+        lambda v: "n/a" if v is None or pd.isna(v) else ("∞" if v == float("inf") else f"{v:.1f}"))
+    baseline = rows[0]["market_pct"]
+
+    fig = go.Figure()
+    for mix, name in _MIX_NAMES.items():
+        sub = df[df["mix"] == mix]
+        if sub.empty:
+            continue
+        fig.add_trace(go.Bar(
+            x=sub["fixed_term_pct"], y=sub["label"], orientation="h", name=name,
+            marker_color=_MIX_COLOURS[mix],
+            text=sub["fixed_term_pct"].apply(lambda p: f"{p:.0f}%"), textposition="outside",
+            customdata=sub[["ratio_txt", "research", "lecturer", "n"]].values,
+            hovertemplate=("%{y}<br>Fixed-term: %{x:.1f}%<br>"
+                           "Research posts per lecturer post: %{customdata[0]} "
+                           "(%{customdata[1]} research, %{customdata[2]} lecturer)<br>"
+                           "%{customdata[3]} contracted roles<extra></extra>"),
+        ))
+    fig.add_vline(
+        x=baseline, line_color=_MUTED, line_width=1.5,
+        annotation_text=f"all adverts {baseline:.0f}%", annotation_position="top",
+    )
+    fig.update_layout(
+        title="Precarity by discipline: fixed-term share and recruitment mix",
+        barmode="overlay",
+        xaxis=dict(title="Fixed-term contracts (%)", ticksuffix="%", range=[0, 100]),
+        yaxis=dict(title="", categoryorder="array", categoryarray=list(df["label"])),
+        legend=dict(orientation="h", yanchor="top", y=-0.12, x=0),
+        margin=dict(l=200, b=110),
+    )
+    return _style_fig(fig)

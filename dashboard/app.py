@@ -64,6 +64,7 @@ from analysis.trends import (
     salary_disclosure_by_group,
     intl_vs_uk_profile,
     fixed_term_share_by_discipline,
+    recruitment_mix_by_discipline,
     application_window_by_discipline,
     contract_hours_matrix,
     deadline_urgency_buckets,
@@ -112,6 +113,7 @@ from dashboard.charts import (
     salary_transparency_breakdown,
     intl_vs_uk_profile_bars,
     casualisation_by_discipline_bar,
+    precarity_mix_bar,
     application_window_by_discipline_bar,
     precarity_matrix_heatmap,
     deadline_pressure_bar,
@@ -362,6 +364,8 @@ def _intl_vs_uk(d):         return intl_vs_uk_profile(days=max(d, 120))
 
 @st.cache_data(ttl=300)
 def _casualisation(d):      return fixed_term_share_by_discipline(days=max(d, 180), min_n=40)
+@st.cache_data(ttl=300)
+def _recruitment_mix(d):    return recruitment_mix_by_discipline(days=max(d, 180), min_n=40)
 
 @st.cache_data(ttl=300)
 def _app_window_by_disc(d): return application_window_by_discipline(days=max(d, 90))
@@ -494,6 +498,12 @@ with t_trends:
         st.plotly_chart(casualisation_by_discipline_bar(_casualisation(lookback_days)), width='stretch', key="casualisation")
         st.caption("Fixed-term share of contracted postings per discipline (last 180 days; disciplines with 40+ "
                    "contracted roles). Bars right of the dashed baseline are more casualised than the market.")
+        st.plotly_chart(precarity_mix_bar(_recruitment_mix(lookback_days)), width='stretch', key="precarity_mix")
+        st.caption("The same fixed-term shares, coloured by what each discipline is hiring: research posts "
+                   "(research fellow/associate/assistant, postdoc) versus lecturer posts, classified from titles. "
+                   "Research-heavy disciplines cluster at the top because research posts are almost all fixed-term; "
+                   "a balanced or teaching-heavy discipline sitting high is teaching on temporary contracts. "
+                   "Hover for the research-posts-per-lecturer-post ratio.")
         st.plotly_chart(precarity_matrix_heatmap(_contract_hours_matrix(lookback_days)), width='stretch', key="precarity_matrix")
         st.caption("Postings by contract-type × hours (share of the enriched subset). The outlined cell is the "
                    "doubly-precarious fixed-term + part-time corner.")

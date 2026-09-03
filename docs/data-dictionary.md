@@ -131,6 +131,7 @@ Built in `dashboard/charts.py`, laid out across tabs in `dashboard/app.py`.
 | Trends | Avg salary floor by category over time | `salary_inflation_line` | salary_min, first_seen |
 | Trends | Salary transparency (% hiding pay) | `salary_transparency_line` | salary_min, first_seen |
 | Trends | Permanent vs fixed-term per week | `contract_type_bar` | contract_type (enriched) |
+| Trends | Precarity by discipline × recruitment mix | `precarity_mix_bar` | contract_type, title, date_posted, job_disciplines |
 | Trends | Permanent contract share % | `permanent_ratio_line` | contract_type (enriched) |
 | Trends | Full- vs part-time per week | `hours_bar` | hours (enriched) |
 | Trends | Application window length (over time) | `recruitment_window_line` | closing_date, date_posted (enriched) |

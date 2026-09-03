@@ -23,45 +23,16 @@ import re
 import sqlite3
 from pathlib import Path
 
-from config import DB_PATH, discipline_label
+from config import DB_PATH, LEGACY_JOB_TYPE_SLUGS, discipline_label
 
-# Title keywords that mark a research post vs a lecturer post (any grade).
-_RESEARCH_RE = re.compile(r"research (?:fellow|associate|assistant)|postdoc", re.IGNORECASE)
-_LECTURER_RE = re.compile(r"lecturer", re.IGNORECASE)
-
-# Legacy job-type slugs from the pre-June-2026 taxonomy — not disciplines.
-_NOT_DISCIPLINES = {"professional-or-managerial", "academic-or-research", "further-education",
-                    "craft-or-manual", "clerical", "technical"}
+# Role classification and the balanced band are shared with the dashboard chart.
+from analysis.trends import BALANCED_BAND, mix_label, role_flags  # noqa: E402,F401
 
 # Palette (validated with the dataviz skill's checker: CVD ΔE 24.7, normal ΔE 33.6, ≥3:1 on surface)
 BLUE, ORANGE = "#2a78d6", "#eb6834"          # research-heavy / teaching-heavy
 NEUTRAL = "#a3a19a"                           # balanced: de-emphasis grey, deliberately not a third hue
 SURFACE, INK, INK2, MUTED, GRID, AXIS = "#fcfcfb", "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7"
-
-# A discipline whose research:lecturer ratio sits inside this band is "balanced" —
-# neither research- nor teaching-heavy — so a ratio of 1.0 isn't forced to a side.
-BALANCED_BAND = (0.8, 1.25)
-
-
-def mix_label(res_per_lec: float | None) -> str:
-    """'research' | 'teaching' | 'balanced' from the research-posts-per-lecturer-post ratio."""
-    if res_per_lec is None:
-        return "teaching"          # no lecturer posts at all only happens with no research posts either at our gates
-    lo, hi = BALANCED_BAND
-    if res_per_lec > hi:
-        return "research"
-    if res_per_lec < lo:
-        return "teaching"
-    return "balanced"
-
-
 _MIX_COLOUR = {"research": BLUE, "teaching": ORANGE, "balanced": NEUTRAL}
-
-
-def role_flags(title: str) -> tuple[bool, bool]:
-    """(is_research_post, is_lecturer_post) from a job title."""
-    t = title or ""
-    return bool(_RESEARCH_RE.search(t)), bool(_LECTURER_RE.search(t))
 
 
 def load_data(db_path: Path, min_n: int = 100) -> dict:
@@ -101,7 +72,7 @@ def load_data(db_path: Path, min_n: int = 100) -> dict:
 
     rows = []
     for cat, d in per_disc.items():
-        if cat in _NOT_DISCIPLINES or d["n_contract"] < min_n:
+        if cat in LEGACY_JOB_TYPE_SLUGS or d["n_contract"] < min_n:
             continue
         rows.append({
             "category": cat, **d,

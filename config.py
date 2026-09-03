@@ -67,6 +67,14 @@ SALARY_CEILING = 200_000
 # The dashboard/analysis "category" dimension is now the discipline.
 CATEGORY_LABELS = DISCIPLINES
 
+# Job-type slugs from the retired pre-June-2026 taxonomy that still ride on old
+# rows' `category`. They are not disciplines, so discipline-level analyses that
+# would otherwise treat them as one (e.g. the recruitment-mix chart) skip them.
+LEGACY_JOB_TYPE_SLUGS = frozenset({
+    "academic-or-research", "professional-or-managerial", "further-education",
+    "craft-or-manual", "clerical", "technical",
+})
+
 # Connector words kept lowercase when prettifying a slug that has no explicit
 # display name (matches how the legacy job-type names read, e.g. "Academic or
 # Research").

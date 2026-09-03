@@ -6,6 +6,14 @@ All notable changes to this project are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- **Precarity-by-discipline chart on the dashboard** (Trends › Contracts):
+  `precarity_mix_bar` shows each discipline's fixed-term share against the
+  all-adverts line, coloured by recruitment mix — research-heavy, balanced or
+  teaching-heavy, from research-vs-lecturer titles — via
+  `trends.recruitment_mix_by_discipline`. The title classifiers and the
+  balanced band live in `analysis/trends.py` and are shared with the PNG script.
+  `config.LEGACY_JOB_TYPE_SLUGS` names the retired job-type slugs so
+  discipline analyses can skip them.
 - **`scripts/casualisation_chart.py`** — renders the "precarity by discipline" PNG
   (fixed-term share per discipline vs the all-adverts baseline, coloured by
   research-heavy / balanced / teaching-heavy recruitment mix) for sharing outside
