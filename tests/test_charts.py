@@ -365,37 +365,6 @@ def test_intl_vs_uk_profile_placeholder_when_empty():
     assert len(fig.data) == 0
 
 
-def test_casualisation_bar_diverges_around_baseline():
-    """Bars are anchored at the sample-weighted market baseline; disciplines above
-    the baseline colour _NEG (more casualised), below colour _POS, and bars are
-    ordered ascending by fixed-term %.
-    """
-    rows = [
-        {"category": "computer-sciences", "n": 100, "fixed_term_pct": 30.0},
-        {"category": "health-and-medical", "n": 100, "fixed_term_pct": 70.0},
-    ]
-    fig = charts.casualisation_by_discipline_bar(rows)
-    bar = fig.data[0]
-    assert bar.type == "bar"
-    assert bar.orientation == "h"
-    # Equal n → baseline is the simple mean of the two shares.
-    assert bar.base == 50.0
-    # Sorted ascending by fixed-term %: lower share first.
-    assert list(bar.y) == ["Computer Sciences", "Health & Medical"]
-    # Deltas are measured from the baseline.
-    assert list(bar.x) == [-20.0, 20.0]
-    # Below-baseline → _POS (green), above-baseline → _NEG (red).
-    assert list(bar.marker.color) == [charts._POS, charts._NEG]
-    # Baseline drawn as a reference line.
-    assert any(s.line.dash == "dash" for s in fig.layout.shapes)
-
-
-def test_casualisation_bar_placeholder_when_empty():
-    fig = charts.casualisation_by_discipline_bar([])
-    assert len(fig.data) == 0
-    assert any("data" in (a.text or "").lower() for a in fig.layout.annotations)
-
-
 def test_application_window_by_discipline_bar_renders_dots_and_reference():
     """Median dot per discipline, an IQR whisker per discipline, and a single
     market-median reference line."""

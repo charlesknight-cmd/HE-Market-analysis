@@ -1587,57 +1587,6 @@ def intl_vs_uk_profile_bars(rows: list[dict]) -> go.Figure:
     return _style_fig(fig)
 
 
-def casualisation_by_discipline_bar(rows: list[dict]) -> go.Figure:
-    """Diverging bars: each discipline's fixed-term share vs the market baseline.
-
-    The casualisation "league table". The market baseline is the overall
-    fixed-term share across the supplied disciplines (sample-weighted by n), drawn
-    as a dashed reference line. Each bar spans from that baseline to the
-    discipline's own fixed-term %, so length encodes the gap: disciplines more
-    casualised than the market run right in _NEG, less casualised run left in
-    _POS. Bars are ordered by fixed-term % (least casualised at the bottom), the
-    exact share is labelled on each bar, and n shows on hover.
-    """
-    if not rows:
-        return _empty()
-    total_n = sum(r["n"] for r in rows)
-    if total_n == 0:
-        return _empty()
-    # Sample-weighted overall fixed-term share = market baseline.
-    baseline = sum(r["fixed_term_pct"] * r["n"] for r in rows) / total_n
-
-    df = pd.DataFrame(rows)
-    df["label"] = df["category"].map(_label)
-    df["delta"] = df["fixed_term_pct"] - baseline
-    df["colour"] = df["delta"].apply(lambda d: _NEG if d >= 0 else _POS)
-    df = df.sort_values("fixed_term_pct")
-
-    fig = go.Figure(go.Bar(
-        x=df["delta"], y=df["label"],
-        base=baseline,
-        orientation="h",
-        marker_color=df["colour"],
-        text=df["fixed_term_pct"].apply(lambda p: f"{p:.0f}%"),
-        textposition="outside",
-        customdata=df[["fixed_term_pct", "n"]].values,
-        hovertemplate=("%{y}<br>Fixed-term: %{customdata[0]:.1f}%<br>"
-                       "(%{customdata[1]} contracted roles)<extra></extra>"),
-    ))
-    fig.add_vline(
-        x=baseline, line_dash="dash", line_color="grey",
-        annotation_text=f"market baseline {baseline:.0f}%",
-        annotation_position="top",
-    )
-    fig.update_layout(
-        title="Casualisation league table: fixed-term share by discipline",
-        xaxis=dict(title="Fixed-term contracts (%)", ticksuffix="%", range=[0, 100]),
-        yaxis_title="",
-        margin=dict(l=200),
-        showlegend=False,
-    )
-    return _style_fig(fig)
-
-
 def application_window_by_discipline_bar(rows: list[dict]) -> go.Figure:
     """Horizontal dot-and-whisker: median days-to-apply per discipline.
 

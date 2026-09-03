@@ -63,7 +63,6 @@ from analysis.trends import (
     postings_by_weekday,
     salary_disclosure_by_group,
     intl_vs_uk_profile,
-    fixed_term_share_by_discipline,
     recruitment_mix_by_discipline,
     application_window_by_discipline,
     contract_hours_matrix,
@@ -112,7 +111,6 @@ from dashboard.charts import (
     recruiter_concentration_curve,
     salary_transparency_breakdown,
     intl_vs_uk_profile_bars,
-    casualisation_by_discipline_bar,
     precarity_mix_bar,
     application_window_by_discipline_bar,
     precarity_matrix_heatmap,
@@ -363,8 +361,6 @@ def _salary_disclosure_groups(d): return salary_disclosure_by_group(days=max(d, 
 def _intl_vs_uk(d):         return intl_vs_uk_profile(days=max(d, 120))
 
 @st.cache_data(ttl=300)
-def _casualisation(d):      return fixed_term_share_by_discipline(days=max(d, 180), min_n=40)
-@st.cache_data(ttl=300)
 def _recruitment_mix(d):    return recruitment_mix_by_discipline(days=max(d, 180), min_n=40)
 
 @st.cache_data(ttl=300)
@@ -495,11 +491,9 @@ with t_trends:
             st.plotly_chart(permanent_ratio_line(_contract_trend(weeks)), width='stretch', key="permanent_ratio")
         with col_c3:
             st.plotly_chart(hours_bar(_hours_trend(weeks)), width='stretch', key="hours")
-        st.plotly_chart(casualisation_by_discipline_bar(_casualisation(lookback_days)), width='stretch', key="casualisation")
-        st.caption("Fixed-term share of contracted postings per discipline (last 180 days; disciplines with 40+ "
-                   "contracted roles). Bars right of the dashed baseline are more casualised than the market.")
         st.plotly_chart(precarity_mix_bar(_recruitment_mix(lookback_days)), width='stretch', key="precarity_mix")
-        st.caption("The same fixed-term shares, coloured by what each discipline is hiring: research posts "
+        st.caption("Fixed-term share of contracted postings per discipline (last 180 days; disciplines with 40+ "
+                   "contracted roles) against the all-adverts line, coloured by what each discipline is hiring: research posts "
                    "(research fellow/associate/assistant, postdoc) versus lecturer posts, classified from titles. "
                    "Research-heavy disciplines cluster at the top because research posts are almost all fixed-term; "
                    "a balanced or teaching-heavy discipline sitting high is teaching on temporary contracts. "

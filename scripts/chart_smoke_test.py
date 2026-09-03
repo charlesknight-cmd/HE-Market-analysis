@@ -58,7 +58,6 @@ CASES = [
     ("recruiter_concentration_curve", charts.recruiter_concentration_curve, lambda: institution_posting_distribution(days=max(LOOKBACK_DAYS, 120))),
     ("salary_transparency_breakdown", charts.salary_transparency_breakdown, lambda: trends.salary_disclosure_by_group(days=max(LOOKBACK_DAYS, 120))),
     ("intl_vs_uk_profile_bars", charts.intl_vs_uk_profile_bars, lambda: trends.intl_vs_uk_profile(days=max(LOOKBACK_DAYS, 120))),
-    ("casualisation_by_discipline_bar", charts.casualisation_by_discipline_bar, lambda: trends.fixed_term_share_by_discipline(days=180, min_n=40)),
     ("precarity_mix_bar", charts.precarity_mix_bar, lambda: trends.recruitment_mix_by_discipline(days=180, min_n=40)),
     ("application_window_by_discipline_bar", charts.application_window_by_discipline_bar, lambda: trends.application_window_by_discipline(days=max(LOOKBACK_DAYS, 90), min_n=10)),
     ("precarity_matrix_heatmap", charts.precarity_matrix_heatmap, lambda: trends.contract_hours_matrix(days=max(LOOKBACK_DAYS, 90))),

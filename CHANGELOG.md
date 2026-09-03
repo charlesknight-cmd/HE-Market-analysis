@@ -75,6 +75,12 @@ All notable changes to this project are recorded here. Format loosely follows
 - Per-tab orientation captions and the active lookback window shown in the header.
 - Unit tests: `tests/test_stemming.py`, `tests/test_labels.py`.
 
+### Removed
+- The **casualisation league table** (`casualisation_by_discipline_bar` and its
+  `fixed_term_share_by_discipline` query): superseded by the precarity-by-
+  discipline chart, which shows the same fixed-term shares plus the recruitment
+  mix that explains them.
+
 ### Changed
 - Discipline-level analytics (weekly/monthly counts, share, growth, salary by
   discipline, seasonality heatmap, region × discipline, disclosure gap,

@@ -1020,41 +1020,6 @@ def intl_vs_uk_profile(days: int = 120) -> list[dict]:
     return result
 
 
-def fixed_term_share_by_discipline(days: int = 180, min_n: int = 40) -> list[dict]:
-    """Per-discipline casualisation: fixed-term share of contracted postings.
-
-    Over the true-posting-date window, for postings whose contract_type is known
-    to be permanent or fixed-term, compute
-        fixed_term_pct = fixed-term / (permanent + fixed-term) * 100
-    per discipline, alongside the sample size n. Only disciplines with at least
-    `min_n` contracted postings are kept, so the league table isn't dominated by
-    thin, noisy samples. Sorted ascending by fixed_term_pct (least to most
-    casualised). Uses date_posted directly (YYYY-MM-DD, 100% filled) — no
-    _CLEAN_TS wrapper needed.
-    """
-    with get_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT
-                category,
-                COUNT(*)                                                       AS n,
-                SUM(CASE WHEN contract_type = 'fixed-term' THEN 1 ELSE 0 END)  AS fixed_term,
-                ROUND(
-                    SUM(CASE WHEN contract_type = 'fixed-term' THEN 1 ELSE 0 END)
-                    * 100.0 / COUNT(*), 1
-                )                                                              AS fixed_term_pct
-            FROM jobs_by_discipline
-            WHERE contract_type IN ('permanent', 'fixed-term')
-              AND date_posted >= date('now', :offset)
-            GROUP BY category
-            HAVING n >= :min_n
-            ORDER BY fixed_term_pct ASC
-            """,
-            {"offset": f"-{days} days", "min_n": min_n},
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
 def application_window_by_discipline(days: int = 180, min_n: int = 10) -> list[dict]:
     """Application-window benchmark per discipline over the posting-date window.
 
