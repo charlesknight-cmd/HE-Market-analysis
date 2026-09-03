@@ -9,3 +9,4 @@ venv/
 
 # Local critique cache from the impeccable design skill (not project code)
 .impeccable/
+reports/

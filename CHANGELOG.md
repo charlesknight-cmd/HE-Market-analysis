@@ -6,6 +6,11 @@ All notable changes to this project are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- **`scripts/casualisation_chart.py`** — renders the "precarity by discipline" PNG
+  (fixed-term share per discipline vs the all-adverts baseline, coloured by
+  research-heavy / balanced / teaching-heavy recruitment mix) for sharing outside
+  the dashboard. Reads `jobs_by_discipline`; needs matplotlib (not in
+  requirements.txt). Output goes to the gitignored `reports/`.
 - **Multi-discipline attribution.** A job on jobs.ac.uk can be tagged with
   several of the 21 subject disciplines, but `jobs.category` only ever held the
   facet the scraper scanned first (alphabetical), which skewed every
