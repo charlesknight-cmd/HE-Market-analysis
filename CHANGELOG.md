@@ -6,6 +6,9 @@ All notable changes to this project are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- **`scripts/attribution_chart.py`** — dumbbell PNG of adverts per discipline
+  counted once (first-listed subject) versus under every subject they carry,
+  with the ratio per row; the companion to `docs/linkedin-discipline-attribution.md`.
 - **Precarity-by-discipline chart on the dashboard** (Trends › Contracts):
   `precarity_mix_bar` shows each discipline's fixed-term share against the
   all-adverts line, coloured by recruitment mix — research-heavy, balanced or
