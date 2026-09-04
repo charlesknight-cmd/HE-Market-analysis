@@ -1,5 +1,9 @@
 # Dashboard review, September 2026
 
+> **Status (4 September 2026): implemented.** Everything below was applied in the
+> commit that follows this note, with one addition the review missed: PhD
+> studentships are now excluded from every fixed-term share. See CHANGELOG.
+
 Reviewed against the live database as of 3 September 2026: 7,014 adverts, posting
 dates March to September, 14 weeks of daily scraping, every advert tagged with its
 full set of disciplines. All 43 charts were rendered from a copy of the live data at

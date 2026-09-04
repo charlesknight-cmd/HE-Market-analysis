@@ -7,6 +7,7 @@ db/queries.py, exercised against a throwaway SQLite file.
 """
 
 import sqlite3
+from datetime import date, timedelta
 
 import pytest
 
@@ -183,12 +184,17 @@ class TestEnrichUrl:
 
 # ------------------------------------------------------------- DB layer --
 
+# Any day seven days back lies in the previous, COMPLETE ISO week — the weekly
+# series exclude the current partial week, so windowed tests post there.
+LAST_WEEK = (date.today() - timedelta(days=7)).isoformat()
+
+
 def _job(job_id, category, **extra):
     return {"job_id": job_id, "title": f"Lecturer {job_id}", "institution": "Uni",
             "department": None, "salary_raw": None, "salary_min": 40000.0, "salary_max": 45000.0,
             "closing_date": "2026-12-01", "contract_type": "permanent", "hours": "full-time",
             "category": category, "url": f"https://www.jobs.ac.uk/job/{job_id}/x",
-            "date_posted": "2026-09-01", **extra}
+            "date_posted": LAST_WEEK, **extra}
 
 
 @pytest.fixture
@@ -305,12 +311,12 @@ class TestDisciplineStorage:
 
 class TestAnalysisUsesViews:
     def test_weekly_counts_count_each_discipline(self, tmp_db):
-        from analysis.trends import category_weekly_counts, overall_summary
+        from analysis.trends import category_weekly_counts, headline_stats
         bulk_upsert([_job("A1", "economics")])
         bulk_upsert([_job("A1", "law")])
-        counts = {r["category"]: r["job_count"] for r in category_weekly_counts(weeks=2)}
+        counts = {r["category"]: r["job_count"] for r in category_weekly_counts(weeks=4)}
         assert counts == {"economics": 1, "law": 1}
-        assert overall_summary()["categories"] == 2
+        assert headline_stats()["disciplines"] == 2
 
     def test_spike_candidates_count_jobs_not_tags(self, tmp_db):
         from analysis.institutions import spike_candidates

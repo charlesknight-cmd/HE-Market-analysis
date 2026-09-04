@@ -25,8 +25,9 @@ from pathlib import Path
 
 from config import DB_PATH, LEGACY_JOB_TYPE_SLUGS, discipline_label
 
-# Role classification and the balanced band are shared with the dashboard chart.
-from analysis.trends import BALANCED_BAND, mix_label, role_flags  # noqa: E402,F401
+# Role classification, the balanced band and the studentship rule are shared
+# with the dashboard chart.
+from analysis.trends import BALANCED_BAND, is_studentship, mix_label, role_flags  # noqa: E402,F401
 
 # Palette (validated with the dataviz skill's checker: CVD ΔE 24.7, normal ΔE 33.6, ≥3:1 on surface)
 BLUE, ORANGE = "#2a78d6", "#eb6834"          # research-heavy / teaching-heavy
@@ -52,18 +53,20 @@ def load_data(db_path: Path, min_n: int = 100) -> dict:
             d = per_disc.setdefault(r["category"], {"n": 0, "n_contract": 0, "fixed": 0,
                                                     "research": 0, "lecturer": 0})
             d["n"] += 1
-            if r["contract_type"] in ("permanent", "fixed-term"):
+            # PhD studentships are training places, fixed-term by nature: out of the share.
+            if r["contract_type"] in ("permanent", "fixed-term") and not is_studentship(r["title"]):
                 d["n_contract"] += 1
                 d["fixed"] += r["contract_type"] == "fixed-term"
             res, lec = role_flags(r["title"])
             d["research"] += res
             d["lecturer"] += lec
 
-        total, contracted, fixed_all = conn.execute(
-            "SELECT COUNT(*), "
-            "SUM(contract_type IN ('permanent','fixed-term')), "
-            "SUM(contract_type = 'fixed-term') FROM jobs"
-        ).fetchone()
+        total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+        market = [r for r in conn.execute(
+            "SELECT title, contract_type FROM jobs WHERE contract_type IN ('permanent','fixed-term')"
+        ) if not is_studentship(r["title"])]
+        contracted = len(market)
+        fixed_all = sum(r["contract_type"] == "fixed-term" for r in market)
         posted_min, posted_max = conn.execute(
             "SELECT MIN(date_posted), MAX(date_posted) FROM jobs WHERE date_posted IS NOT NULL"
         ).fetchone()
@@ -157,7 +160,7 @@ def render(data: dict, out_path: Path) -> Path:
     footer = (
         f"Source: {meta['jobs']:,} adverts on jobs.ac.uk posted {(meta['posted_min'] or '')[:7]} to "
         f"{(meta['posted_max'] or '')[:7]}, scraped daily. Fixed-term share uses the {meta['contracted']:,} "
-        "adverts stating a contract type;\n"
+        "adverts stating a contract type, excluding PhD studentships;\n"
         f"disciplines with under {meta['min_n']} such adverts omitted. An advert tagged with several "
         "disciplines counts under each. Role types are classified from the job title.\n"
         "Advertised posts, not the employed workforce."

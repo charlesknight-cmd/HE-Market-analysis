@@ -2,14 +2,26 @@
 
 import re
 import math
-from collections import Counter, defaultdict
+from collections import defaultdict
 
-from config import LEGACY_JOB_TYPE_SLUGS
+from config import LEGACY_JOB_TYPE_SLUGS, discipline_label
 from db.schema import get_connection
 
-# SQLite helper: strip timezone suffix so strftime works on both old and new timestamps
-_CLEAN_TS      = "substr(replace(first_seen, 'T', ' '), 1, 19)"
-_CLEAN_LAST_TS = "substr(replace(last_seen,  'T', ' '), 1, 19)"
+# Every windowed query keys off `date_posted` (the advert's true publication
+# date, YYYY-MM-DD, 100% filled) — never `first_seen`, which is when the scraper
+# first saw it and carries a 1,836-advert backfill spike in the week the scraper
+# went live (26 May 2026).
+
+# Weekly series exclude the current, partial ISO week: plotting it as if complete
+# makes every series end in a false drop and turns week-on-week growth negative
+# on any day but Sunday. `date('now', '-6 days', 'weekday 1')` is the Monday on
+# or before today (SQLite's 'weekday 1' rolls forward to the next Monday, so
+# stepping back six days first makes it land on the current week's Monday).
+_COMPLETE_WEEKS = "date_posted < date('now', '-6 days', 'weekday 1')"
+
+# Retired job-type slugs (pre-June-2026 taxonomy) still ride on a few rows'
+# `category`; they are not disciplines, so discipline breakdowns skip them.
+_NOT_LEGACY = "category NOT IN (" + ", ".join(f"'{x}'" for x in sorted(LEGACY_JOB_TYPE_SLUGS)) + ")"
 
 # Discipline-level queries read from the views in db/schema.py rather than the
 # jobs table: `jobs_by_discipline` has one row per job x academic discipline
@@ -18,32 +30,24 @@ _CLEAN_LAST_TS = "substr(replace(last_seen,  'T', ' '), 1, 19)"
 # first-listed discipline (for per-job distributions that must not double count).
 # `jobs.category` alone only records the facet a job was first scraped under.
 
-_STOPWORDS = {
-    'a', 'an', 'the', 'of', 'in', 'for', 'and', 'at', 'to', 'with', 'on',
-    'by', 'or', 'is', 'are', 'be', 'from', 'as', 'into', 'its', 'this',
-    'that', 'which', 'has', 'have', 'had', 'will', 'would', 'our', 'your',
-    'their', 'we', 'you', 'he', 'she', 'it', 'they', 'amp', 'new', 'fixed',
-    'term', 'based', 'part', 'time', 'full',
-    # Geographic / institutional tokens — not role descriptors, so they muddy the
-    # "title keyword" framing of the word-frequency and salary-premium charts
-    # (e.g. "london" reading as a high-premium keyword is London weighting, not a
-    # role). Filtered from both since both treat tokens as role signals.
-    'london', 'uk', 'united', 'kingdom', 'university', 'college', 'school',
-}
+def category_weekly_counts(weeks: int = 52) -> list[dict]:
+    """Postings per discipline per complete ISO week (true posting date).
 
-
-def category_weekly_counts(weeks: int = 12) -> list[dict]:
-    """New job postings per category per ISO week for the last N weeks."""
+    A multi-discipline advert counts under each discipline. The current partial
+    week is excluded (see _COMPLETE_WEEKS); `weeks` bounds the history.
+    """
     days = weeks * 7
     with get_connection() as conn:
         rows = conn.execute(
             f"""
             SELECT
-                strftime('%Y-W%W', {_CLEAN_TS}) AS week,
+                strftime('%Y-W%W', date_posted) AS week,
                 category,
                 COUNT(*)                          AS job_count
             FROM jobs_by_discipline
-            WHERE {_CLEAN_TS} >= datetime('now', :offset)
+            WHERE date_posted >= date('now', :offset)
+              AND {_COMPLETE_WEEKS}
+              AND {_NOT_LEGACY}
             GROUP BY week, category
             ORDER BY week, category
             """,
@@ -52,7 +56,7 @@ def category_weekly_counts(weeks: int = 12) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def category_share_over_time(weeks: int = 16) -> list[dict]:
+def category_share_over_time(weeks: int = 52) -> list[dict]:
     """Weekly category share as a percentage of all discipline tags that week.
 
     A job tagged with several disciplines contributes to each, so the
@@ -75,7 +79,7 @@ def category_share_over_time(weeks: int = 16) -> list[dict]:
 
 
 def category_growth_wow() -> list[dict]:
-    """Week-on-week percentage change per category."""
+    """Change per discipline between the last two COMPLETE weeks."""
     rows = category_weekly_counts(weeks=4)
     if not rows:
         return []
@@ -101,228 +105,20 @@ def category_growth_wow() -> list[dict]:
     return sorted(results, key=lambda x: (x["change_pct"] or 0), reverse=True)
 
 
-def monthly_postings(months: int = 12) -> list[dict]:
-    """New postings per month per category — for seasonal pattern analysis."""
-    days = months * 31
-    with get_connection() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT
-                strftime('%Y-%m', {_CLEAN_TS}) AS month,
-                category,
-                COUNT(*)                        AS job_count
-            FROM jobs_by_discipline
-            WHERE {_CLEAN_TS} >= datetime('now', :offset)
-            GROUP BY month, category
-            ORDER BY month, category
-            """,
-            {"offset": f"-{days} days"},
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def salary_by_month(months: int = 12) -> list[dict]:
-    """Average salary floor per category per month — for inflation tracking."""
-    days = months * 31
-    with get_connection() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT
-                strftime('%Y-%m', {_CLEAN_TS}) AS month,
-                category,
-                ROUND(AVG(salary_min), 0)       AS avg_salary_min,
-                COUNT(*)                        AS n
-            FROM jobs_by_discipline
-            WHERE salary_min IS NOT NULL
-              AND {_CLEAN_TS} >= datetime('now', :offset)
-            GROUP BY month, category
-            ORDER BY month, category
-            """,
-            {"offset": f"-{days} days"},
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def salary_trends_by_category(weeks: int = 12) -> list[dict]:
-    """Average salary band per category per week (jobs with parsed salary)."""
+def contract_type_trend(weeks: int = 52) -> list[dict]:
+    """Permanent vs fixed-term adverts per complete ISO week (true posting date)."""
     days = weeks * 7
     with get_connection() as conn:
         rows = conn.execute(
             f"""
             SELECT
-                strftime('%Y-W%W', {_CLEAN_TS}) AS week,
-                category,
-                ROUND(AVG(salary_min), 0)         AS avg_salary_min,
-                ROUND(AVG(salary_max), 0)         AS avg_salary_max,
-                COUNT(*)                          AS n
-            FROM jobs_by_discipline
-            WHERE salary_min IS NOT NULL
-              AND {_CLEAN_TS} >= datetime('now', :offset)
-            GROUP BY week, category
-            ORDER BY week, category
-            """,
-            {"offset": f"-{days} days"},
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def daily_new_jobs(days: int = 30) -> list[dict]:
-    """Total new job postings per day for the last N days."""
-    with get_connection() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT
-                date({_CLEAN_TS}) AS day,
-                COUNT(*)           AS job_count
-            FROM jobs
-            WHERE {_CLEAN_TS} >= datetime('now', :offset)
-            GROUP BY day
-            ORDER BY day
-            """,
-            {"offset": f"-{days} days"},
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-# --- Conservative singular/plural folding -------------------------------------
-# Safety model: a plural is folded into its singular ONLY when that singular is
-# ALSO an attested key in the same aggregated data (never invent a stem). Two
-# extra guards make the must-not-mangle words impossible to collapse even if a
-# coincidental shorter token exists:
-#   1. suffix guard  -> -ss/-us/-is/-sis/-ics/-ous (business, campus, analysis,
-#                       physics/mathematics/economics, status...)
-#   2. word blocklist -> irregular Greek/Latin plurals and lexicalised -s words
-#                       (news, studies, species, series, analyses, theses,
-#                       crises, bases, indices, criteria, data, media...).
-# NOTE: do NOT add a blanket "-ses" suffix guard — it would also block the
-# regular plurals processes->process, classes->class, buses->bus. The irregular
-# -ses words are covered by _NEVER_DEPLURAL_WORDS instead.
-
-_NEVER_DEPLURAL_SUFFIXES = (
-    "ss",   # business, access, address, class, process (as a singular)
-    "us",   # campus, status, bonus, focus, syllabus
-    "is",   # basis, axis, thesis (singular)
-    "sis",  # analysis, diagnosis, emphasis, synthesis
-    "ics",  # physics, mathematics, economics, statistics, ethics
-    "ous",  # adjectival tail, never a plural
-)
-
-_NEVER_DEPLURAL_WORDS = {
-    # lexicalised -s singulars / mass nouns
-    "news", "studies", "species", "series", "lens", "bias", "kudos",
-    # irregular Greek/Latin plurals (-ses, -es, -ices, etc.)
-    "analyses", "theses", "diagnoses", "bases", "crises", "axes",
-    "indices", "matrices", "criteria", "phenomena", "data", "media",
-}
-
-
-def _singular_candidates(word: str) -> list:
-    """Plausible singular forms of a lowercased plural-looking token.
-
-    Returns [] when the token must NEVER be de-pluralised. Forms are only
-    candidates; a merge happens in merge_plural_variants and only if a
-    candidate is itself an attested key.
-    """
-    if not word.endswith("s"):
-        return []
-    if word in _NEVER_DEPLURAL_WORDS:
-        return []
-    for suf in _NEVER_DEPLURAL_SUFFIXES:
-        if word.endswith(suf):
-            return []
-
-    cands = []
-    if word.endswith("ies") and len(word) > 4:    # libraries -> library
-        cands.append(word[:-3] + "y")
-    if word.endswith("es") and len(word) > 4:      # processes -> process, classes -> class
-        cands.append(word[:-2])
-    if len(word) > 3:                              # lecturers -> lecturer
-        cands.append(word[:-1])
-
-    seen, out = set(), []
-    for c in cands:
-        if c and c != word and c not in seen:
-            seen.add(c)
-            out.append(c)
-    return out
-
-
-def merge_plural_variants(counts) -> dict:
-    """Fold plural tokens into their singular when BOTH forms occur in `counts`.
-
-    `counts` MUST be the FINAL aggregated token->count mapping (dict or Counter),
-    never a per-title slice. A plural is merged only if its singular candidate is
-    already a key, so no stem is ever invented. Processing is in sorted() order
-    for determinism. Returns a new plain dict.
-    """
-    keys = set(counts.keys())
-    merged = dict(counts)
-    for word in sorted(counts.keys()):
-        if word not in merged:
-            continue
-        for cand in _singular_candidates(word):
-            if cand in keys and cand in merged:
-                merged[cand] = merged.get(cand, 0) + merged.pop(word)
-                break
-    return merged
-
-
-def title_word_frequency(days: int = 90, top_n: int = 30) -> list[dict]:
-    """Top words appearing in job titles over the last N days."""
-    with get_connection() as conn:
-        rows = conn.execute(
-            f"SELECT title FROM jobs WHERE {_CLEAN_TS} >= datetime('now', :offset)",
-            {"offset": f"-{days} days"},
-        ).fetchall()
-    words: Counter = Counter()
-    for (title,) in rows:
-        tokens = re.findall(r"\b[a-zA-Z][a-zA-Z]+\b", title or "")
-        tokens = [t.lower() for t in tokens if t.lower() not in _STOPWORDS and len(t) > 2]
-        words.update(tokens)
-    # Fold singular/plural variants on the AGGREGATED counts (e.g. lecturer +
-    # lecturers -> lecturer). Sorted (-count, term) replaces most_common so the
-    # plain-dict result still ranks highest-first with a deterministic tiebreak.
-    merged = merge_plural_variants(words)
-    ranked = sorted(merged.items(), key=lambda kv: (-kv[1], kv[0]))[:top_n]
-    return [{"term": t, "count": c} for t, c in ranked]
-
-
-def job_longevity_distribution() -> list[dict]:
-    """Distribution of how many days jobs remain visible in the search listings.
-
-    'days_visible' = last_seen - first_seen. Zero means seen only once.
-    Note: this measures time visible in the listings, not actual close date.
-    """
-    with get_connection() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT
-                CAST(ROUND(
-                    julianday({_CLEAN_LAST_TS}) -
-                    julianday({_CLEAN_TS})
-                ) AS INTEGER) AS days_visible,
-                COUNT(*) AS job_count
-            FROM jobs
-            GROUP BY days_visible
-            ORDER BY days_visible
-            """,
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def contract_type_trend(weeks: int = 12) -> list[dict]:
-    """Weekly count of permanent vs fixed-term contracts."""
-    days = weeks * 7
-    with get_connection() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT
-                strftime('%Y-W%W', {_CLEAN_TS}) AS week,
+                strftime('%Y-W%W', date_posted) AS week,
                 contract_type,
                 COUNT(*) AS job_count
             FROM jobs
             WHERE contract_type IS NOT NULL
-              AND {_CLEAN_TS} >= datetime('now', :offset)
+              AND date_posted >= date('now', :offset)
+              AND {_COMPLETE_WEEKS}
             GROUP BY week, contract_type
             ORDER BY week, contract_type
             """,
@@ -331,120 +127,26 @@ def contract_type_trend(weeks: int = 12) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def hours_trend(weeks: int = 12) -> list[dict]:
-    """Weekly count of full-time vs part-time vs flexible jobs."""
+def hours_trend(weeks: int = 52) -> list[dict]:
+    """Full-time / part-time / flexible adverts per complete ISO week (true posting date)."""
     days = weeks * 7
     with get_connection() as conn:
         rows = conn.execute(
             f"""
             SELECT
-                strftime('%Y-W%W', {_CLEAN_TS}) AS week,
+                strftime('%Y-W%W', date_posted) AS week,
                 hours,
                 COUNT(*) AS job_count
             FROM jobs
             WHERE hours IS NOT NULL
-              AND {_CLEAN_TS} >= datetime('now', :offset)
+              AND date_posted >= date('now', :offset)
+              AND {_COMPLETE_WEEKS}
             GROUP BY week, hours
             ORDER BY week, hours
             """,
             {"offset": f"-{days} days"},
         ).fetchall()
     return [dict(r) for r in rows]
-
-
-def overall_summary() -> dict:
-    """High-level counts for a quick status overview."""
-    with get_connection() as conn:
-        total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-        new_7d = conn.execute(
-            f"SELECT COUNT(*) FROM jobs WHERE {_CLEAN_TS} >= datetime('now', '-7 days')"
-        ).fetchone()[0]
-        new_30d = conn.execute(
-            f"SELECT COUNT(*) FROM jobs WHERE {_CLEAN_TS} >= datetime('now', '-30 days')"
-        ).fetchone()[0]
-        categories = conn.execute(
-            "SELECT COUNT(DISTINCT category) FROM jobs_by_discipline"
-        ).fetchone()[0]
-        institutions = conn.execute(
-            "SELECT COUNT(DISTINCT institution) FROM jobs WHERE institution IS NOT NULL"
-        ).fetchone()[0]
-    return {
-        "total_jobs":   total,
-        "new_7d":       new_7d,
-        "new_30d":      new_30d,
-        "categories":   categories,
-        "institutions": institutions,
-    }
-
-
-def seasonal_heatmap_data() -> list[dict]:
-    """Return job counts grouped by calendar month number and category."""
-    with get_connection() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT
-                strftime('%m', {_CLEAN_TS}) AS month_num,
-                category,
-                COUNT(*)                    AS job_count
-            FROM jobs_by_discipline
-            GROUP BY month_num, category
-            ORDER BY month_num, category
-            """
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def recruitment_window_trends(weeks: int = 24) -> list[dict]:
-    """Return average gap in days between closing_date and first_seen over time."""
-    days = weeks * 7
-    with get_connection() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT
-                strftime('%Y-W%W', {_CLEAN_TS}) AS week,
-                ROUND(AVG(julianday(closing_date) - julianday(COALESCE(date_posted, date({_CLEAN_TS})))), 1) AS avg_window_days,
-                COUNT(*) AS job_count
-            FROM jobs
-            WHERE closing_date IS NOT NULL
-              AND {_CLEAN_TS} >= datetime('now', :offset)
-            GROUP BY week
-            ORDER BY week
-            """,
-            {"offset": f"-{days} days"}
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def market_concentration_trends(weeks: int = 24) -> list[dict]:
-    """Calculate the Herfindahl-Hirschman Index (HHI) of institutions per week."""
-    days = weeks * 7
-    with get_connection() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT
-                strftime('%Y-W%W', {_CLEAN_TS}) AS week,
-                institution,
-                COUNT(*) AS job_count
-            FROM jobs
-            WHERE institution IS NOT NULL
-              AND {_CLEAN_TS} >= datetime('now', :offset)
-            GROUP BY week, institution
-            ORDER BY week
-            """,
-            {"offset": f"-{days} days"}
-        ).fetchall()
-
-    weekly_counts = defaultdict(list)
-    for r in rows:
-        weekly_counts[r["week"]].append(r["job_count"])
-
-    hhi_trends = []
-    for week, counts in sorted(weekly_counts.items()):
-        total = sum(counts)
-        if total > 0:
-            hhi = sum(((count / total) * 100) ** 2 for count in counts)
-            hhi_trends.append({"week": week, "hhi": round(hhi, 1), "total_jobs": total})
-    return hhi_trends
 
 
 def _percentile(data: list[float], pct: float) -> float:
@@ -459,143 +161,6 @@ def _percentile(data: list[float], pct: float) -> float:
     return sorted_data[lower] * (upper - index) + sorted_data[upper] * (index - lower)
 
 
-def salary_percentile_trends(weeks: int = 24) -> list[dict]:
-    """Calculate 25th, 50th, and 75th percentiles of salary floors over time."""
-    days = weeks * 7
-    with get_connection() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT
-                strftime('%Y-W%W', {_CLEAN_TS}) AS week,
-                salary_min
-            FROM jobs
-            WHERE salary_min IS NOT NULL
-              AND {_CLEAN_TS} >= datetime('now', :offset)
-            ORDER BY week
-            """,
-            {"offset": f"-{days} days"}
-        ).fetchall()
-
-    weekly_salaries = defaultdict(list)
-    for r in rows:
-        weekly_salaries[r["week"]].append(r["salary_min"])
-
-    trends = []
-    for week, salaries in sorted(weekly_salaries.items()):
-        if len(salaries) >= 3:
-            p25 = _percentile(salaries, 0.25)
-            p50 = _percentile(salaries, 0.50)
-            p75 = _percentile(salaries, 0.75)
-            trends.append({
-                "week": week,
-                "p25": round(p25, 0),
-                "p50": round(p50, 0),
-                "p75": round(p75, 0),
-                "n": len(salaries)
-            })
-    return trends
-
-
-def keyword_salary_premiums(days: int = 90, min_occurrences: int = 2) -> list[dict]:
-    """Calculate the percentage salary premium for top keywords in job titles relative to category baseline."""
-    with get_connection() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT title, salary_min, category
-            FROM jobs_primary_discipline
-            WHERE salary_min IS NOT NULL
-              AND {_CLEAN_TS} >= datetime('now', :offset)
-            """,
-            {"offset": f"-{days} days"}
-        ).fetchall()
-
-    cat_salaries = defaultdict(list)
-    for r in rows:
-        cat_salaries[r["category"]].append(r["salary_min"])
-
-    cat_baselines = {}
-    for cat, salaries in cat_salaries.items():
-        cat_baselines[cat] = sum(salaries) / len(salaries)
-
-    keyword_data = defaultdict(list)
-    for r in rows:
-        title = r["title"] or ""
-        tokens = re.findall(r"\b[a-zA-Z][a-zA-Z]+\b", title)
-        unique_tokens = {t.lower() for t in tokens if t.lower() not in _STOPWORDS and len(t) > 2}
-        # Collapse a singular+plural pair WITHIN the same title (e.g. "Lecturer and
-        # Senior Lecturers") down to the singular, so this one title contributes a
-        # single (salary, baseline) tuple to the merged concept rather than two —
-        # the aggregate fold below would otherwise double-count it.
-        unique_tokens -= {
-            tok for tok in unique_tokens
-            if any(c in unique_tokens for c in _singular_candidates(tok))
-        }
-        for token in unique_tokens:
-            baseline = cat_baselines.get(r["category"], r["salary_min"])
-            keyword_data[token].append((r["salary_min"], baseline))
-
-    # Fold singular/plural variants ACROSS titles on the FINAL aggregated keys
-    # (singular in one title, plural in another). Within-title pairs are already
-    # collapsed above, so each title contributes at most once to a merged key; we
-    # pick survivors from the per-token counts, then concatenate each folded
-    # plural's (salary, baseline) tuples onto its singular survivor, keeping
-    # count / avg_salary / premium_pct correct.
-    token_counts = {tok: len(vals) for tok, vals in keyword_data.items()}
-    survivors = set(merge_plural_variants(token_counts).keys())
-    merged_data = defaultdict(list)
-    for tok, vals in keyword_data.items():
-        if tok in survivors:
-            target = tok
-        else:
-            target = next((c for c in _singular_candidates(tok) if c in survivors), tok)
-        merged_data[target].extend(vals)
-    keyword_data = merged_data
-
-    premiums = []
-    for token, values in keyword_data.items():
-        if len(values) >= min_occurrences:
-            avg_premium = sum((sal / base) - 1 for sal, base in values) / len(values)
-            avg_salary = sum(sal for sal, _ in values) / len(values)
-            premiums.append({
-                "term": token,
-                "count": len(values),
-                "avg_salary": round(avg_salary, 0),
-                "premium_pct": round(avg_premium * 100, 1)
-            })
-
-    return sorted(premiums, key=lambda x: x["premium_pct"], reverse=True)
-
-
-def salary_transparency_trend(weeks: int = 12) -> list[dict]:
-    """Weekly share of postings that do NOT disclose a parseable salary."""
-    days = weeks * 7
-    with get_connection() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT
-                strftime('%Y-W%W', {_CLEAN_TS}) AS week,
-                COUNT(*) AS total,
-                SUM(CASE WHEN salary_min IS NULL THEN 1 ELSE 0 END) AS undisclosed
-            FROM jobs
-            WHERE {_CLEAN_TS} >= datetime('now', :offset)
-            GROUP BY week
-            ORDER BY week
-            """,
-            {"offset": f"-{days} days"},
-        ).fetchall()
-    result = []
-    for r in rows:
-        total = r["total"] or 0
-        und = r["undisclosed"] or 0
-        result.append({
-            "week": r["week"],
-            "total": total,
-            "undisclosed": und,
-            "undisclosed_pct": round(und / total * 100, 1) if total else 0,
-        })
-    return result
-
-
 def salary_distribution(days: int = 90) -> list[dict]:
     """Raw salary floors (with category) for distribution / histogram analysis."""
     with get_connection() as conn:
@@ -604,7 +169,7 @@ def salary_distribution(days: int = 90) -> list[dict]:
             SELECT salary_min, category
             FROM jobs_primary_discipline
             WHERE salary_min IS NOT NULL
-              AND {_CLEAN_TS} >= datetime('now', :offset)
+              AND date_posted >= date('now', :offset)
             """,
             {"offset": f"-{days} days"},
         ).fetchall()
@@ -613,16 +178,29 @@ def salary_distribution(days: int = 90) -> list[dict]:
 
 # Seniority bands, ordered most-specific first so first-match classification is correct
 # (e.g. "associate professor" must be tested before the bare "professor" rule).
+# Second pass (Sept 2026): plurals ("Maths Lecturers"), lectureships, "SL/AP",
+# teaching fellows / tutors / teachers (their own band — they are neither
+# lecturers nor researchers), open-rank faculty posts, fellowships and research
+# scientists, and the professional-services vocabulary that made
+# "Other / Unclassified" the second-largest band.
 _SENIORITY_RULES = [
     ("Associate Prof / Reader",   r"associate professor|\breader\b"),
-    ("Senior Lecturer",           r"senior lecturer|principal lecturer"),
-    ("Lecturer / Assistant Prof", r"\blecturer\b|assistant professor"),
+    ("Senior Lecturer",           r"senior lecturers?|principal lecturers?|\bsl/ap\b"),
+    ("Lecturer / Assistant Prof", r"\blecturers?\b|lectureship|assistant professor"),
     ("Professor",                 r"\bprofessor\b|\bchair\b|\bprof\b"),
-    ("Research Fellow / Postdoc", r"research fellow|post-?doctoral|\bpostdoc\b|research associate|research assistant"),
-    ("PhD / Studentship",         r"\bphd\b|doctoral|studentship|graduate teaching"),
-    ("Director / Head / Dean",    r"\bdirector\b|head of|\bdean\b|\bpro vice\b|\bvice-chancellor\b"),
-    ("Manager / Officer",         r"\bmanager\b|\bofficer\b|\bco-?ordinator\b|\badministrator\b"),
-    ("Technician / Analyst",      r"\btechnician\b|\banalyst\b|\bengineer\b|\bdeveloper\b"),
+    ("Teaching Fellow / Tutor",   r"teaching fellow|teaching associate|teaching assistant|\btutor\b|\bteacher\b|"
+                                  r"\bdemonstrator\b|\binstructor\b|hourly paid teaching|graduate teaching"),
+    ("Faculty (open rank)",       r"open[- ]rank|\bfaculty (?:position|member|post)|tenure[- ]track"),
+    ("Research Fellow / Postdoc", r"research fellow|post-?doctoral|\bpostdoc\b|research associate|research assistant|"
+                                  r"\bresearcher\b|research scientist|\bscientist\b|\bfellowship\b|\bfellow\b"),
+    ("PhD / Studentship",         r"\bphd\b|\bdphil\b|doctoral|studentship"),
+    ("Director / Head / Dean",    r"\bdirector\b|head of|\bdean\b|\bpro vice\b|\bvice-chancellor\b|\bprovost\b"),
+    ("Manager / Officer",         r"\bmanager\b|\bofficer\b|\bco-?ordinator\b|\badministrator\b|\blead\b|"
+                                  r"\bleader\b|\badvis[eo]r\b|\bconsultant\b|\bpartner\b"),
+    ("Technician / Specialist",   r"\btechnician\b|\banalyst\b|\bengineer\b|\bdeveloper\b|\bnurse\b|"
+                                  r"\bspecialist\b|\btechnical\b|\bpractitioner\b|\btrainer\b|\blibrarian\b|"
+                                  r"\bassistant\b|\bprosector\b|\bmidwife\b|\bpharmacist\b|\bpsychologist\b|"
+                                  r"\bclinician\b|\bsupport\b"),
 ]
 
 
@@ -642,7 +220,7 @@ def jobs_by_region(days: int = 90) -> list[dict]:
             SELECT region, COUNT(*) AS job_count
             FROM jobs
             WHERE region IS NOT NULL
-              AND {_CLEAN_TS} >= datetime('now', :offset)
+              AND date_posted >= date('now', :offset)
             GROUP BY region
             ORDER BY job_count DESC
             """,
@@ -659,7 +237,7 @@ def top_locations(days: int = 90, limit: int = 15) -> list[dict]:
             SELECT location, COUNT(*) AS job_count
             FROM jobs
             WHERE location IS NOT NULL
-              AND {_CLEAN_TS} >= datetime('now', :offset)
+              AND date_posted >= date('now', :offset)
             GROUP BY location
             ORDER BY job_count DESC
             LIMIT :lim
@@ -676,7 +254,7 @@ def seniority_breakdown(days: int = 365) -> list[dict]:
             f"""
             SELECT title, salary_min
             FROM jobs
-            WHERE {_CLEAN_TS} >= datetime('now', :offset)
+            WHERE date_posted >= date('now', :offset)
             """,
             {"offset": f"-{days} days"},
         ).fetchall()
@@ -728,7 +306,7 @@ def seniority_salary_ladder(days: int = 365, min_n: int = 15) -> list[dict]:
             FROM jobs
             WHERE salary_min IS NOT NULL
               AND hours = 'full-time'
-              AND {_CLEAN_TS} >= datetime('now', :offset)
+              AND date_posted >= date('now', :offset)
             """,
             {"offset": f"-{days} days"},
         ).fetchall()
@@ -760,10 +338,10 @@ def application_window_distribution(days: int = 180) -> list[dict]:
         rows = conn.execute(
             f"""
             SELECT julianday(closing_date)
-                   - julianday(COALESCE(date_posted, date({_CLEAN_TS}))) AS window_days
+                   - julianday(date_posted) AS window_days
             FROM jobs
             WHERE closing_date IS NOT NULL
-              AND {_CLEAN_TS} >= datetime('now', :offset)
+              AND date_posted >= date('now', :offset)
             """,
             {"offset": f"-{days} days"},
         ).fetchall()
@@ -799,7 +377,7 @@ def _median_salary_by(column: str, days: int, min_jobs: int) -> list[dict]:
             FROM jobs
             WHERE {column} IS NOT NULL
               AND salary_min IS NOT NULL
-              AND {_CLEAN_TS} >= datetime('now', :offset)
+              AND date_posted >= date('now', :offset)
             """,
             {"offset": f"-{days} days"},
         ).fetchall()
@@ -821,7 +399,8 @@ def region_category_matrix(days: int = 180) -> list[dict]:
             SELECT region, category, COUNT(*) AS job_count
             FROM jobs_by_discipline
             WHERE region IS NOT NULL
-              AND {_CLEAN_TS} >= datetime('now', :offset)
+              AND {_NOT_LEGACY}
+              AND date_posted >= date('now', :offset)
             GROUP BY region, category
             """,
             {"offset": f"-{days} days"},
@@ -830,8 +409,14 @@ def region_category_matrix(days: int = 180) -> list[dict]:
 
 
 def salary_by_region(days: int = 180, min_jobs: int = 3) -> list[dict]:
-    """Median salary floor per region (UK nation / International)."""
-    return _median_salary_by("region", days, min_jobs)
+    """Median salary floor per UK nation.
+
+    International is excluded: those figures are foreign salaries converted at
+    the day's rate with under half disclosed, so a £ median is not comparable
+    (intl_vs_uk_profile compares disclosure rate instead).
+    """
+    return [r for r in _median_salary_by("region", days, min_jobs)
+            if r["group"] not in ("International", "UK (unspecified)")]
 
 
 def salary_by_contract_type(days: int = 180, min_jobs: int = 3) -> list[dict]:
@@ -913,7 +498,7 @@ def salary_disclosure_by_group(days: int = 120) -> list[dict]:
     """
     with get_connection() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT
                 category AS grp,
                 'discipline' AS dim,
@@ -923,6 +508,7 @@ def salary_disclosure_by_group(days: int = 120) -> list[dict]:
             WHERE date_posted >= date('now', :offset)
               AND category IS NOT NULL
               AND category != ''
+              AND {_NOT_LEGACY}
             GROUP BY category
             UNION ALL
             SELECT
@@ -1033,13 +619,14 @@ def application_window_by_discipline(days: int = 180, min_n: int = 10) -> list[d
     """
     with get_connection() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT job_id, category,
                    julianday(closing_date) - julianday(date_posted) AS window_days
             FROM jobs_by_discipline
             WHERE closing_date IS NOT NULL
               AND date_posted IS NOT NULL
               AND category IS NOT NULL
+              AND {_NOT_LEGACY}
               AND date_posted >= date('now', :offset)
               AND (julianday(closing_date) - julianday(date_posted)) BETWEEN 0 AND 180
             """,
@@ -1267,6 +854,18 @@ _LECTURER_TITLE_RE = re.compile(r"lecturer", re.IGNORECASE)
 BALANCED_BAND = (0.8, 1.25)
 
 
+# PhD studentships are training places, not employment; they are 96% fixed-term
+# by nature and would inflate any fixed-term share, so precarity measures drop
+# them. Matches the seniority band's PhD rule plus doctoral-student wording.
+_STUDENTSHIP_RE = re.compile(
+    r"\bphd\b|\bdphil\b|studentship|doctoral (?:student|researcher|candidate|scholar|training)", re.IGNORECASE)
+
+
+def is_studentship(title: str | None) -> bool:
+    """True if the advert is a PhD/doctoral studentship rather than a job."""
+    return bool(_STUDENTSHIP_RE.search(title or ""))
+
+
 def role_flags(title: str | None) -> tuple[bool, bool]:
     """(is_research_post, is_lecturer_post) from a job title."""
     t = title or ""
@@ -1289,15 +888,18 @@ def mix_label(res_per_lec: float | None) -> str:
     return "balanced"
 
 
-def recruitment_mix_by_discipline(days: int = 180, min_n: int = 40) -> list[dict]:
+def recruitment_mix_by_discipline(days: int = 180, min_n: int = 40,
+                                  exclude_studentships: bool = True) -> list[dict]:
     """Per-discipline fixed-term share alongside its research:lecturer recruitment mix.
 
     Over the true-posting-date window, for each academic discipline (via
     `jobs_by_discipline`, so a multi-discipline advert counts under each) count
     research posts and lecturer posts from titles, and the fixed-term share of
-    adverts stating a contract type. Disciplines with fewer than `min_n` such
-    contracted adverts are dropped, as are legacy job-type slugs. `market_pct`
-    (the all-adverts fixed-term share, counting each job once) is carried on
+    adverts stating a contract type. PhD studentships are excluded from the
+    fixed-term share by default (see is_studentship) — they are not jobs and are
+    fixed-term by nature. Disciplines with fewer than `min_n` contracted adverts
+    are dropped, as are legacy job-type slugs. `market_pct` (the all-adverts
+    fixed-term share, counting each job once, same exclusion) is carried on
     every row so the builder can draw one reference line.
 
     Returns rows of {category, n, fixed_term, fixed_term_pct, research, lecturer,
@@ -1315,23 +917,29 @@ def recruitment_mix_by_discipline(days: int = 180, min_n: int = 40) -> list[dict
             """,
             {"offset": offset},
         ).fetchall()
-        contracted, fixed_all = conn.execute(
+        market_rows = conn.execute(
             """
-            SELECT SUM(contract_type IN ('permanent', 'fixed-term')),
-                   SUM(contract_type = 'fixed-term')
+            SELECT title, contract_type
             FROM jobs
             WHERE date_posted >= date('now', :offset)
+              AND contract_type IN ('permanent', 'fixed-term')
             """,
             {"offset": offset},
-        ).fetchone()
+        ).fetchall()
 
-    market_pct = round(100 * (fixed_all or 0) / contracted, 1) if contracted else 0.0
+    def _counts(r) -> bool:
+        return not (exclude_studentships and is_studentship(r["title"]))
+
+    market = [r for r in market_rows if _counts(r)]
+    contracted = len(market)
+    fixed_all = sum(r["contract_type"] == "fixed-term" for r in market)
+    market_pct = round(100 * fixed_all / contracted, 1) if contracted else 0.0
     per: dict[str, dict] = {}
     for r in rows:
         if r["category"] in LEGACY_JOB_TYPE_SLUGS:
             continue
         d = per.setdefault(r["category"], {"n": 0, "fixed_term": 0, "research": 0, "lecturer": 0})
-        if r["contract_type"] in ("permanent", "fixed-term"):
+        if r["contract_type"] in ("permanent", "fixed-term") and _counts(r):
             d["n"] += 1
             d["fixed_term"] += r["contract_type"] == "fixed-term"
         res, lec = role_flags(r["title"])
@@ -1351,3 +959,203 @@ def recruitment_mix_by_discipline(days: int = 180, min_n: int = 40) -> list[dict
             "market_pct": market_pct,
         })
     return sorted(result, key=lambda x: x["fixed_term_pct"])
+
+
+# --- Headline figures, pay by discipline, sub-discipline drill-down, coverage ---
+
+def headline_stats(days: int = 90) -> dict:
+    """The numbers the Overview leads with, each stated as a level, not a trend.
+
+    Weekly counts use the last two COMPLETE ISO weeks (true posting date) so the
+    delta is week-vs-week, never partial-vs-full. Rates are over the last `days`
+    days of postings. Studentships are excluded from the permanent share for the
+    same reason as in recruitment_mix_by_discipline.
+    """
+    with get_connection() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+        weeks = conn.execute(
+            f"""
+            SELECT strftime('%Y-W%W', date_posted) AS week, COUNT(*) AS n
+            FROM jobs
+            WHERE {_COMPLETE_WEEKS}
+            GROUP BY week ORDER BY week DESC LIMIT 2
+            """
+        ).fetchall()
+        recent = conn.execute(
+            """
+            SELECT title, contract_type, salary_min,
+                   julianday(closing_date) - julianday(date_posted) AS window_days
+            FROM jobs
+            WHERE date_posted >= date('now', :offset)
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+        institutions = conn.execute(
+            "SELECT COUNT(DISTINCT institution) FROM jobs "
+            "WHERE institution IS NOT NULL AND date_posted >= date('now', :offset)",
+            {"offset": f"-{days} days"},
+        ).fetchone()[0]
+        disciplines = conn.execute(
+            f"SELECT COUNT(DISTINCT category) FROM jobs_by_discipline WHERE {_NOT_LEGACY}"
+        ).fetchone()[0]
+
+    windows = [r["window_days"] for r in recent
+               if r["window_days"] is not None and 0 <= r["window_days"] <= 180]
+    contracted = [r for r in recent if r["contract_type"] in ("permanent", "fixed-term")
+                  and not is_studentship(r["title"])]
+    n_recent = len(recent)
+    return {
+        "total_jobs": total,
+        "last_week": weeks[0]["n"] if weeks else 0,
+        "last_week_label": weeks[0]["week"] if weeks else None,
+        "prev_week": weeks[1]["n"] if len(weeks) > 1 else None,
+        "median_window_days": round(_percentile(windows, 0.5)) if windows else None,
+        "hidden_pay_pct": round(100 * sum(r["salary_min"] is None for r in recent) / n_recent, 1) if n_recent else None,
+        "permanent_pct": round(100 * sum(r["contract_type"] == "permanent" for r in contracted) / len(contracted), 1)
+                         if contracted else None,
+        "institutions": institutions,
+        "disciplines": disciplines,
+        "window_days": days,
+        "n_recent": n_recent,
+    }
+
+
+def salary_by_discipline(days: int = 180, min_n: int = 20) -> list[dict]:
+    """Median advertised salary floor per discipline, with the p25-p75 spread.
+
+    Full-time adverts only (part-time quote FTE and pro-rata inconsistently) over
+    the true-posting-date window; a multi-discipline advert counts under each of
+    its disciplines. Disciplines with fewer than `min_n` salaried full-time
+    adverts are omitted. Sorted by median ascending.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT category, salary_min
+            FROM jobs_by_discipline
+            WHERE salary_min IS NOT NULL
+              AND hours = 'full-time'
+              AND {_NOT_LEGACY}
+              AND date_posted >= date('now', :offset)
+            """,
+            {"offset": f"-{days} days"},
+        ).fetchall()
+    by_cat: dict[str, list] = defaultdict(list)
+    for r in rows:
+        by_cat[r["category"]].append(r["salary_min"])
+    result = [{
+        "category": cat,
+        "median_salary": round(_percentile(v, 0.5)),
+        "p25": round(_percentile(v, 0.25)),
+        "p75": round(_percentile(v, 0.75)),
+        "n": len(v),
+    } for cat, v in by_cat.items() if len(v) >= min_n]
+    return sorted(result, key=lambda x: x["median_salary"])
+
+
+def _tag_breakdown(where: str, params: dict, min_n: int) -> list[dict]:
+    """Shared body for the sub-discipline and non-academic breakdowns."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT d.slug, d.name, j.title, j.contract_type, j.salary_min, j.hours
+            FROM job_disciplines d
+            JOIN jobs j ON j.job_id = d.job_id
+            WHERE {where}
+              AND j.date_posted >= date('now', :offset)
+            """,
+            params,
+        ).fetchall()
+    per: dict[str, dict] = {}
+    for r in rows:
+        d = per.setdefault(r["slug"], {"name": None, "n": 0, "contracted": 0, "fixed_term": 0, "salaries": []})
+        d["name"] = d["name"] or r["name"]
+        d["n"] += 1
+        if r["contract_type"] in ("permanent", "fixed-term") and not is_studentship(r["title"]):
+            d["contracted"] += 1
+            d["fixed_term"] += r["contract_type"] == "fixed-term"
+        if r["salary_min"] is not None and r["hours"] == "full-time":
+            d["salaries"].append(r["salary_min"])
+    result = []
+    for slug, d in per.items():
+        if d["n"] < min_n:
+            continue
+        result.append({
+            "slug": slug,
+            "name": d["name"] or discipline_label(slug),
+            "n": d["n"],
+            "fixed_term_pct": round(100 * d["fixed_term"] / d["contracted"], 1) if d["contracted"] else None,
+            "n_contracted": d["contracted"],
+            "median_salary": round(_percentile(d["salaries"], 0.5)) if len(d["salaries"]) >= 5 else None,
+            "n_salaried": len(d["salaries"]),
+        })
+    return sorted(result, key=lambda x: -x["n"])
+
+
+def subdiscipline_breakdown(parent_slug: str, days: int = 180, min_n: int = 5) -> list[dict]:
+    """Adverts per sub-discipline within one academic discipline.
+
+    Sub-discipline tags come from each advert's detail page (job_disciplines,
+    facet 'sub', parent_slug = the discipline). For each with at least `min_n`
+    adverts in the true-posting-date window: count, fixed-term share of
+    contracted non-studentship adverts, and the median full-time salary floor
+    (None below five salaried adverts). Sorted by count descending.
+    """
+    return _tag_breakdown("d.facet = 'sub' AND d.parent_slug = :parent",
+                          {"parent": parent_slug, "offset": f"-{days} days"}, min_n)
+
+
+def nonacademic_breakdown(days: int = 180, min_n: int = 5) -> list[dict]:
+    """Adverts per non-academic (professional services) area — the jobs the
+    discipline charts cannot see. Same shape as subdiscipline_breakdown."""
+    return _tag_breakdown("d.facet = 'non-academic'", {"offset": f"-{days} days"}, min_n)
+
+
+def attribution_counts() -> list[dict]:
+    """Adverts per discipline under three attribution rules, all time.
+
+    every_tag: counted under every academic discipline the advert carries.
+    first_listed: one label per advert, the first subject on its detail page.
+    first_scanned: one label per advert, the facet the scraper scanned first
+    (the project's original, alphabetically biased rule). `ratio` is
+    every_tag / first_listed. Legacy job-type slugs are dropped.
+    """
+    with get_connection() as conn:
+        every = dict(conn.execute("SELECT category, COUNT(*) FROM jobs_by_discipline GROUP BY 1").fetchall())
+        first = dict(conn.execute("SELECT category, COUNT(*) FROM jobs_primary_discipline GROUP BY 1").fetchall())
+        scanned = dict(conn.execute("SELECT category, COUNT(*) FROM jobs GROUP BY 1").fetchall())
+    rows = []
+    for cat, n in every.items():
+        if cat in LEGACY_JOB_TYPE_SLUGS:
+            continue
+        f = first.get(cat, 0)
+        rows.append({"category": cat, "every_tag": n, "first_listed": f,
+                     "first_scanned": scanned.get(cat, 0),
+                     "ratio": round(n / f, 2) if f else None})
+    return sorted(rows, key=lambda r: (r["ratio"] is None, r["ratio"] or 0))
+
+
+def data_coverage() -> dict:
+    """Fill rates the Data tab reports so a reader can judge each chart's footing."""
+    with get_connection() as conn:
+        r = conn.execute(
+            """
+            SELECT COUNT(*)                                   AS total,
+                   SUM(enriched_at IS NOT NULL)               AS enriched,
+                   SUM(contract_type IS NOT NULL)             AS contract,
+                   SUM(salary_min IS NOT NULL)                AS salaried,
+                   SUM(region IS NOT NULL)                    AS region,
+                   SUM(disciplines_at IS NOT NULL)            AS disciplines,
+                   MIN(date_posted), MAX(date_posted)
+            FROM jobs
+            """
+        ).fetchone()
+        multi = conn.execute(
+            "SELECT COUNT(*) FROM (SELECT job_id FROM job_disciplines WHERE facet = 'academic' "
+            "GROUP BY job_id HAVING COUNT(*) > 1)"
+        ).fetchone()[0]
+    total = r[0] or 0
+    pct = lambda n: round(100 * (n or 0) / total, 1) if total else 0.0
+    return {"total": total, "enriched_pct": pct(r[1]), "contract_pct": pct(r[2]),
+            "salary_pct": pct(r[3]), "region_pct": pct(r[4]), "disciplines_pct": pct(r[5]),
+            "multi_discipline_pct": pct(multi), "posted_min": r[6], "posted_max": r[7]}

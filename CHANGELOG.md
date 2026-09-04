@@ -6,6 +6,31 @@ All notable changes to this project are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- **September 2026 dashboard review implemented** (`docs/dashboard-review-2026-09.md`):
+  - Every windowed query now keys off `date_posted`; `first_seen` is provenance only.
+  - Weekly series (`category_weekly_counts`, `contract_type_trend`, `hours_trend`,
+    `institution_weekly_trend`) exclude the current partial ISO week and show the
+    full history regardless of the lookback control, which now scopes only the
+    cross-sectional charts (default 90 days). Week-on-week growth and its
+    insights compare the last two complete weeks.
+  - Discipline breakdowns skip `config.LEGACY_JOB_TYPE_SLUGS`.
+  - PhD studentships (`trends.is_studentship`) are excluded from every
+    fixed-term share: the precarity chart, the PNG script, the headline
+    permanent share and the sub-discipline drill-downs. Market fixed-term share
+    moves from 62% to 58%.
+  - Seniority classifier second pass (plural lecturers, lectureships, SL/AP,
+    teaching fellows/tutors/teachers as their own band, open-rank faculty,
+    fellowships, research scientists, professional-services vocabulary):
+    unclassified titles fall from 1,323 to 273 of ~7,000.
+  - New: `headline_stats` (Overview figures), `salary_by_discipline` +
+    `salary_by_discipline_bar`, `subdiscipline_breakdown` /
+    `nonacademic_breakdown` + `tag_breakdown_bar` (Roles drill-downs over the
+    89 sub-discipline and 20 professional-services tags), `attribution_counts`
+    + `attribution_dumbbell` (Data tab), `data_coverage` (fill-rate metrics).
+    International dropped from the salary-by-region bar.
+  - Tabs reorganised: Overview · Trends · Pay · Contracts & Timing · Roles ·
+    Institutions (Recruiters / Geography) · Data. 29 charts plus headline
+    figures, down from 43.
 - **`scripts/attribution_chart.py`** — dumbbell PNG of adverts per discipline
   counted once (first-listed subject) versus under every subject they carry,
   with the ratio per row; the companion to `docs/linkedin-discipline-attribution.md`.
@@ -79,6 +104,13 @@ All notable changes to this project are recorded here. Format loosely follows
 - Unit tests: `tests/test_stemming.py`, `tests/test_labels.py`.
 
 ### Removed
+- Sixteen charts and their queries, per the September review: `daily_jobs_line`,
+  `seasonal_heatmap`, `seasonal_bar`, `salary_inflation_line`,
+  `salary_percentile_bands`, `salary_transparency_line`, `permanent_ratio_line`,
+  `recruitment_window_line`, `market_concentration_line`, `new_vs_repeat_bar`,
+  `longevity_histogram`, `category_growth_bar`, `salary_box_by_category`,
+  `keyword_premium_bar`, `title_frequency_bar`, `region_choropleth` (and the
+  title-stemming helpers and `tests/test_stemming.py` that only they used).
 - The **casualisation league table** (`casualisation_by_discipline_bar` and its
   `fixed_term_share_by_discipline` query): superseded by the precarity-by-
   discipline chart, which shows the same fixed-term shares plus the recruitment

@@ -29,8 +29,8 @@ One row per unique listing, keyed by `job_id`.
 | `disciplines_at` | TEXT (ISO-8601 UTC) | enrichment / `scripts.backfill_disciplines` | enriched | When the detail page's Subject Area(s) were captured into `job_disciplines`. NULL ⇒ pending backfill. |
 | `category` | TEXT | discipline facet slug | 100% | **The discipline facet the job was first scraped under — not its full set of disciplines.** A job tagged with several disciplines (common: ~2 in 3 STEM jobs) keeps only the first-scanned one here. Use `job_disciplines` / the `jobs_by_discipline` view for attribution; treat this column as provenance. Rows from before the 2026-06-09 taxonomy change hold a legacy job-type slug (`academic-or-research`, …). |
 | `url` | TEXT | listing (card title link) | 100% | Canonical listing URL; also the detail page fetched for enrichment. |
-| `first_seen` | TEXT (ISO-8601 UTC) | scraper | 100% | When this job_id was first observed. Drives all "new jobs over time" charts. |
-| `last_seen` | TEXT (ISO-8601 UTC) | scraper | 100% | Updated every scrape the job still appears. `last_seen - first_seen` ⇒ listing longevity. |
+| `first_seen` | TEXT (ISO-8601 UTC) | scraper | 100% | When this job_id was first observed. Provenance only: no chart uses it as a time axis (the 26 May 2026 backfill put 1,836 adverts into one week). |
+| `last_seen` | TEXT (ISO-8601 UTC) | scraper | 100% | Updated every scrape the job still appears near the top of its facet. NOT a lifetime measure: the scraper stops paging at the first fully-known page, so older adverts stop being refreshed. |
 
 > Most fields now come straight from the search-results card (jobs.ac.uk retired
 > its RSS feeds ~June 2026). `closing_date`, `location`, and `date_posted` — which
@@ -119,41 +119,59 @@ happened to scan first — alphabetical order, which inflated `agriculture…` a
 ## Chart catalogue
 
 Built in `dashboard/charts.py`, laid out across tabs in `dashboard/app.py`.
+Since the September 2026 review every windowed chart keys off `date_posted`;
+weekly series show every COMPLETE ISO week and ignore the lookback control;
+discipline breakdowns read `jobs_by_discipline` (a multi-discipline advert
+counts under each) and skip `config.LEGACY_JOB_TYPE_SLUGS`; fixed-term shares
+exclude PhD studentships (`trends.is_studentship`).
 
 | Tab | Chart | Function | Needs |
 |-----|-------|----------|-------|
-| Overview | New postings per day (+7-day avg) | `daily_jobs_line` | first_seen |
-| Overview | Weekly postings by category | `category_weekly_bar` | first_seen, category |
-| Trends | Category share over time | `category_share_area` | first_seen, category |
-| Trends | Salary percentile bands (p25/50/75) | `salary_percentile_bands` | salary_min, first_seen |
-| Trends | Seasonality heatmap | `seasonal_heatmap` | first_seen, category |
-| Trends | Monthly postings by category | `seasonal_bar` | first_seen, category |
-| Trends | Avg salary floor by category over time | `salary_inflation_line` | salary_min, first_seen |
-| Trends | Salary transparency (% hiding pay) | `salary_transparency_line` | salary_min, first_seen |
-| Trends | Permanent vs fixed-term per week | `contract_type_bar` | contract_type (enriched) |
-| Trends | Precarity by discipline × recruitment mix | `precarity_mix_bar` | contract_type, title, date_posted, job_disciplines |
-| Trends | Permanent contract share % | `permanent_ratio_line` | contract_type (enriched) |
-| Trends | Full- vs part-time per week | `hours_bar` | hours (enriched) |
-| Trends | Application window length (over time) | `recruitment_window_line` | closing_date, date_posted (enriched) |
-| Trends | Time on market (window distribution) | `application_window_hist` | closing_date, date_posted (enriched) |
-| Trends | Upcoming deadlines by week | `upcoming_deadlines_bar` | closing_date (enriched) |
-| Roles | Median salary: permanent vs fixed-term | `salary_by_contract_bar` | contract_type (enriched), salary_min |
-| Institutions | Median salary by region | `salary_by_region_bar` | region (enriched), salary_min |
-| Institutions | UK postings choropleth map | `region_choropleth` | region (enriched) + bundled uk_nations.geojson |
-| Institutions | Region × category concentration | `region_category_heatmap` | region, category (enriched) |
-| Institutions | Jobs by UK nation / International | `region_bar` | region (enriched) |
-| Institutions | Top hiring locations | `top_locations_bar` | location (enriched) |
+| Overview | Headline figures (adverts, last complete week vs previous, median days to apply, hidden-pay share, permanent share, institutions) | `st.metric` via `trends.headline_stats` | date_posted, closing_date, salary_min, contract_type, title |
+| Overview | Postings per day (+7-day avg, provisional tail) | `posting_volume_line` | date_posted |
+| Overview | Weekly postings by discipline (complete weeks) | `category_weekly_bar` | date_posted, job_disciplines |
+| Overview | Weekday posting cadence | `weekday_cadence_bar` | date_posted |
+| Trends | Discipline share of weekly tags | `category_share_area` | date_posted, job_disciplines |
+| Trends | Permanent vs fixed-term per week | `contract_type_bar` | contract_type, date_posted |
+| Trends | Full- vs part-time per week | `hours_bar` | hours, date_posted |
+| Pay | Salary floor distribution | `salary_distribution_hist` | salary_min |
+| Pay | Median salary: permanent vs fixed-term | `salary_by_contract_bar` | contract_type, salary_min |
+| Pay | Median full-time salary floor by discipline (+IQR) | `salary_by_discipline_bar` | salary_min, hours, job_disciplines |
+| Pay | Academic pay ladder by seniority (+IQR) | `seniority_salary_ladder_bar` | title, salary_min, hours |
+| Pay | Salary-transparency gap by discipline and region | `salary_transparency_breakdown` | salary_min, region, job_disciplines |
+| Pay | Median salary floor by UK nation | `salary_by_region_bar` | region, salary_min |
+| Contracts & Timing | Precarity by discipline × recruitment mix | `precarity_mix_bar` | contract_type, title, job_disciplines |
+| Contracts & Timing | Contract × hours precarity matrix | `precarity_matrix_heatmap` | contract_type, hours |
+| Contracts & Timing | Application window distribution | `application_window_hist` | closing_date, date_posted |
+| Contracts & Timing | Days-to-apply by discipline (+IQR) | `application_window_by_discipline_bar` | closing_date, date_posted, job_disciplines |
+| Contracts & Timing | Upcoming deadlines by week | `upcoming_deadlines_bar` | closing_date |
+| Contracts & Timing | Deadline-pressure pipeline | `deadline_pressure_bar` | closing_date |
 | Roles | Postings by seniority band | `seniority_breakdown_bar` | title, salary_min |
-| Roles | Salary floor distribution | `salary_distribution_hist` | salary_min |
-| Roles | Most frequent title words | `title_frequency_bar` | title |
-| Roles | Category growth (WoW %) | `category_growth_bar` | first_seen, category |
-| Roles | Salary range by category | `salary_box_by_category` | salary_min/max, category |
-| Roles | Keyword salary premium | `keyword_premium_bar` | title, salary_min, category |
-| Institutions | Top recruiting institutions | `top_institutions_bar` | institution, first_seen |
-| Institutions | Salary vs volume scatter | `institution_salary_scatter` | institution, salary_min |
-| Institutions | Recruitment concentration (HHI) | `market_concentration_line` | institution, first_seen |
-| Institutions | New vs returning recruiters | `new_vs_repeat_bar` | institution, first_seen |
-| Institutions | Listing longevity histogram | `longevity_histogram` | first_seen, last_seen |
+| Roles | Sub-discipline drill-down (count, fixed-term share, median pay) | `tag_breakdown_bar` via `trends.subdiscipline_breakdown` | job_disciplines (facet `sub`) |
+| Roles | Professional-services areas | `tag_breakdown_bar` via `trends.nonacademic_breakdown` | job_disciplines (facet `non-academic`) |
+| Institutions | Top recruiting institutions | `top_institutions_bar` | institution, date_posted |
+| Institutions | Spike watch table | `institutions.spike_candidates` | institution, job_disciplines |
+| Institutions | Institution drill-down (complete weeks + discipline table) | `px.bar` via `institution_weekly_trend`, `institution_category_breakdown` | institution, date_posted, job_disciplines |
+| Institutions | Recruiter concentration (Lorenz, Gini) | `recruiter_concentration_curve` | institution, date_posted |
+| Institutions | Pay floor vs hiring volume | `institution_salary_scatter` | institution, salary_min |
+| Institutions | Most re-advertised roles | `most_reposted_bar` | title, institution, date_posted |
+| Institutions | Jobs by UK nation / International | `region_bar` | region |
+| Institutions | Top hiring locations | `top_locations_bar` | location |
+| Institutions | Region × discipline concentration | `region_category_heatmap` | region, job_disciplines |
+| Institutions | International vs UK structural profile | `intl_vs_uk_profile_bars` | region, contract_type, hours, salary_min |
+| Institutions | International destinations by city | `international_destinations_bar` | region, location |
+| Data | Scraper health and fill-rate metrics | `st.metric` via `trends.scraper_health`, `trends.data_coverage` | scrape_runs, enrichment columns |
+| Data | Attribution dumbbell (counted once vs every subject) | `attribution_dumbbell` | job_disciplines |
+| Data | Raw table + CSV export | `st.dataframe` | all columns |
+
+Removed in September 2026 (see `docs/dashboard-review-2026-09.md`): the
+`first_seen`-based daily line, seasonality heatmap and monthly bar, the
+salary-inflation and percentile-band lines, the weekly transparency, permanent-
+share, application-window, HHI and new-vs-returning lines (flat five-point
+series replaced by headline figures), the `last_seen`-based longevity histogram
+(a scraper-depth artefact), the week-on-week growth bar (its query still feeds
+the insights, now on complete weeks), the most-recent-week salary range, the
+keyword-premium bar, the title-word bar and the UK choropleth.
 
 ## Re-measuring fill rates
 

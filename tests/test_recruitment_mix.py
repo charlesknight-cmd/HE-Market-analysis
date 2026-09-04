@@ -5,7 +5,7 @@ from datetime import date
 import pytest
 
 import db.schema as schema
-from analysis.trends import mix_label, recruitment_mix_by_discipline, role_flags
+from analysis.trends import is_studentship, mix_label, recruitment_mix_by_discipline, role_flags
 from dashboard import charts
 from db.queries import bulk_upsert, set_disciplines
 
@@ -13,6 +13,15 @@ TODAY = date.today().isoformat()
 
 
 class TestClassifiers:
+    @pytest.mark.parametrize("title,expected", [
+        ("PhD Studentship in Optics", True), ("Fully funded PhD: lasers", True),
+        ("DPhil in History", True), ("Doctoral Researcher (ESR)", True),
+        ("Research Associate", False), ("Lecturer in Physics", False),
+        ("Postdoctoral Research Fellow", False), (None, False),
+    ])
+    def test_is_studentship(self, title, expected):
+        assert is_studentship(title) is expected
+
     @pytest.mark.parametrize("ratio,expected", [
         (6.2, "research"), (1.3, "research"), (float("inf"), "research"),
         (1.25, "balanced"), (1.03, "balanced"), (1.0, "balanced"), (0.8, "balanced"),
@@ -51,6 +60,19 @@ def db(tmp_path, monkeypatch):
 
 
 class TestRecruitmentMixQuery:
+    def test_studentships_excluded_from_fixed_term_share(self, db):
+        bulk_upsert([
+            _job("S1", "physical-and-environmental-sciences", "PhD Studentship in Optics", "fixed-term"),
+            _job("S2", "physical-and-environmental-sciences", "Fully funded PhD in Lasers", "fixed-term"),
+            _job("P1", "physical-and-environmental-sciences", "Lecturer in Physics", "permanent"),
+            _job("P2", "physical-and-environmental-sciences", "Research Associate", "fixed-term"),
+        ])
+        row = recruitment_mix_by_discipline(days=30, min_n=1)[0]
+        assert (row["n"], row["fixed_term"], row["fixed_term_pct"]) == (2, 1, 50.0)
+        assert row["market_pct"] == 50.0
+        with_phd = recruitment_mix_by_discipline(days=30, min_n=1, exclude_studentships=False)[0]
+        assert (with_phd["n"], with_phd["fixed_term_pct"], with_phd["market_pct"]) == (4, 75.0, 75.0)
+
     def test_counts_mix_and_market_baseline(self, db):
         bulk_upsert([
             _job("B1", "biological-sciences", "Research Associate", "fixed-term"),

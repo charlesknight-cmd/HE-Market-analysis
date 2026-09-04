@@ -1,4 +1,4 @@
-"""Regression tests for the dashboard chart builders (geo map in particular)."""
+"""Regression tests for the dashboard chart builders."""
 
 import os
 import sys
@@ -7,65 +7,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dashboard import charts
-from dashboard.charts import _uk_geojson, _uk_map_view, region_choropleth
-
-
-def test_map_uses_winding_insensitive_trace():
-    """The map must use the MapLibre ``choroplethmap`` trace, not the geo
-    ``choropleth`` trace.
-
-    The geo trace renders on a sphere (d3-geo): a polygon wound the "wrong" way
-    for whatever Plotly.js version is in play inverts to fill the whole frame —
-    the recurring "blank square". MapLibre projects on a plane and is immune to
-    ring winding, so we lock the trace type in to stop a regression back to the
-    fragile, version-sensitive approach.
-    """
-    fig = region_choropleth([{"region": "England", "job_count": 5}])
-    assert fig.data[0].type == "choroplethmap"
-    assert fig.layout.map.style == "white-bg"
-
-
-def test_uk_map_view_frames_the_uk():
-    """Centre/zoom derived from the geojson should actually sit over the UK."""
-    center, zoom = _uk_map_view(_uk_geojson())
-    assert 50 <= center["lat"] <= 58, center
-    assert -6 <= center["lon"] <= -1, center
-    assert 2.5 <= zoom <= 5.5, zoom
-
-
-def test_choropleth_pads_missing_nations_to_zero():
-    rows = [
-        {"region": "England", "job_count": 80},
-        {"region": "Scotland", "job_count": 9},
-        {"region": "International", "job_count": 11},  # excluded from the map
-    ]
-    fig = region_choropleth(rows)
-    trace = fig.data[0]
-    assert sorted(trace.locations) == sorted(charts._UK_NATIONS)
-    by_nation = dict(zip(trace.locations, trace.z))
-    assert by_nation["England"] == 80
-    assert by_nation["Wales"] == 0
-    assert by_nation["Northern Ireland"] == 0
-    assert "International" not in by_nation
-
-
-def test_choropleth_placeholder_when_no_uk_rows():
-    fig = region_choropleth([{"region": "International", "job_count": 5}])
-    assert len(fig.data) == 0
-    assert any("location data" in (a.text or "") for a in fig.layout.annotations)
-
-
-def test_uk_geojson_cache_reuses_until_file_changes():
-    """Cache is keyed on mtime: unchanged file → same object; edit → reload."""
-    first = _uk_geojson()
-    assert _uk_geojson() is first, "unchanged file should reuse the cached object"
-
-    original = charts._GEOJSON_PATH.stat().st_mtime
-    try:
-        os.utime(charts._GEOJSON_PATH, (original + 5, original + 5))
-        assert _uk_geojson() is not first, "mtime change should trigger a reload"
-    finally:
-        os.utime(charts._GEOJSON_PATH, (original, original))
 
 
 def test_salary_scatter_labels_only_standouts():
@@ -114,29 +55,6 @@ def test_posting_volume_line_reindexes_and_zero_fills():
     assert by_day["2026-03-12"] == 0, "interior gap day must be zero-filled"
     # Rolling average trace present (len >= 3) and reflects the zero days.
     assert any(t.name == "7-day avg" for t in fig.data)
-
-
-def test_daily_jobs_line_reindexes_and_zero_fills():
-    """Same contract as posting_volume_line: weekend/quiet days with no row must
-    appear as explicit zeros before the 7-day mean, or the average reads too
-    high (it would hop over the quiet days instead of counting them)."""
-    import pandas as pd
-    # Fri then Mon — the weekend gap (Sat, Sun) must be zero-filled.
-    rows = [
-        {"day": "2026-07-10", "job_count": 20},
-        {"day": "2026-07-13", "job_count": 8},
-    ]
-    fig = charts.daily_jobs_line(rows)
-    daily = fig.data[0]
-    xs = pd.to_datetime(list(daily.x))
-    assert len(xs) == 4
-    assert (xs == pd.date_range("2026-07-10", "2026-07-13", freq="D")).all()
-    by_day = dict(zip([d.strftime("%Y-%m-%d") for d in xs], daily.y))
-    assert by_day["2026-07-11"] == 0, "Saturday must be zero-filled"
-    assert by_day["2026-07-12"] == 0, "Sunday must be zero-filled"
-    # 7-day avg must include the zeros: mean(20,0,0,8) = 7.0, not mean(20,8) = 14.
-    avg = next(t for t in fig.data if t.name == "7-day avg")
-    assert avg.y[-1] == 7.0
 
 
 def test_posting_volume_line_placeholder_when_empty():
@@ -452,3 +370,59 @@ def test_deadline_pressure_placeholder_when_empty():
     zero_rows = [{"bucket": b, "job_count": 0}
                  for b in ["0-3", "4-7", "8-14", "15-30", "30+"]]
     assert len(charts.deadline_pressure_bar(zero_rows).data) == 0
+
+
+# ── September 2026 additions ──────────────────────────────────────────────────
+
+def test_salary_by_discipline_bar_sorted_with_iqr_whiskers():
+    rows = [
+        {"category": "law", "median_salary": 45000, "p25": 40000, "p75": 52000, "n": 30},
+        {"category": "economics", "median_salary": 41000, "p25": 38000, "p75": 47000, "n": 25},
+    ]
+    fig = charts.salary_by_discipline_bar(rows)
+    bar = fig.data[0]
+    assert list(bar.y) == ["Economics", "Law"]                       # ascending median
+    assert list(bar.x) == [41000, 45000]
+    assert list(bar.error_x.array) == [6000, 7000]                    # p75 - median
+    assert list(bar.error_x.arrayminus) == [3000, 5000]               # median - p25
+
+
+def test_salary_by_discipline_bar_empty():
+    assert len(charts.salary_by_discipline_bar([]).data) == 0
+
+
+def test_tag_breakdown_bar_largest_on_top_and_hover_text():
+    rows = [
+        {"slug": "ai", "name": "Artificial Intelligence", "n": 44, "fixed_term_pct": 65.0,
+         "n_contracted": 40, "median_salary": 40968, "n_salaried": 30},
+        {"slug": "cyber", "name": "Cyber Security", "n": 12, "fixed_term_pct": None,
+         "n_contracted": 0, "median_salary": None, "n_salaried": 2},
+    ]
+    fig = charts.tag_breakdown_bar(rows, "Sub-disciplines")
+    bar = fig.data[0]
+    assert list(bar.y) == ["Cyber Security", "Artificial Intelligence"]   # last row = top of a horizontal bar
+    assert list(bar.customdata[0]) == ["n/a", "n/a", 0]
+    assert list(bar.customdata[1]) == ["65%", "£40,968", 40]
+    assert fig.layout.title.text == "Sub-disciplines"
+
+
+def test_tag_breakdown_bar_caps_and_empty():
+    rows = [{"slug": f"s{i}", "name": f"Tag {i}", "n": i, "fixed_term_pct": None,
+             "n_contracted": 0, "median_salary": None, "n_salaried": 0} for i in range(1, 21)]
+    fig = charts.tag_breakdown_bar(rows, "T", limit=5)
+    assert len(fig.data[0].y) == 5 and list(fig.data[0].x) == [16, 17, 18, 19, 20]
+    assert len(charts.tag_breakdown_bar([], "T").data) == 0
+
+
+def test_attribution_dumbbell_orders_by_ratio_and_labels():
+    rows = [
+        {"category": "health-and-medical", "every_tag": 100, "first_listed": 99, "first_scanned": 60, "ratio": 1.01},
+        {"category": "engineering-and-technology", "every_tag": 300, "first_listed": 100, "first_scanned": 170, "ratio": 3.0},
+    ]
+    fig = charts.attribution_dumbbell(rows)
+    assert [t.mode for t in fig.data] == ["lines", "markers", "markers+text"]
+    assert list(fig.layout.yaxis.categoryarray) == ["Health & Medical", "Engineering & Technology"]
+    every = fig.data[2]
+    assert list(every.x) == [100, 300]
+    assert list(every.text) == ["  ×1.0", "  ×3.0"]
+    assert len(charts.attribution_dumbbell([]).data) == 0

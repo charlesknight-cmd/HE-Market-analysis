@@ -10,106 +10,10 @@ from plotly.subplots import make_subplots
 import pandas as pd
 from config import CATEGORY_LABELS, discipline_label
 
+
+
 _UK_NATIONS = ["England", "Scotland", "Wales", "Northern Ireland"]
-_GEOJSON_PATH = Path(__file__).parent / "assets" / "uk_nations.geojson"
-_UK_GEOJSON = None
-_UK_GEOJSON_MTIME = None
 
-
-def _uk_geojson() -> dict:
-    """Load and cache the bundled UK-nations boundary GeoJSON.
-
-    The map is drawn with a MapLibre `choroplethmap` trace, which projects the
-    polygons on a flat Web-Mercator plane and is therefore indifferent to ring
-    winding order — so we serve the file exactly as shipped (no rewinding). This
-    is the deliberate cure for the recurring "blank square": Plotly's older geo
-    `choropleth` trace renders on a sphere and silently inverts wrong-wound
-    rings to fill the whole frame; the MapLibre trace cannot.
-
-    Cache is keyed on the file's mtime so an edit to the geojson is picked up
-    on the next call rather than serving a stale copy until the process restarts.
-    """
-    global _UK_GEOJSON, _UK_GEOJSON_MTIME
-    mtime = _GEOJSON_PATH.stat().st_mtime
-    if _UK_GEOJSON is None or mtime != _UK_GEOJSON_MTIME:
-        with open(_GEOJSON_PATH, encoding="utf-8") as f:
-            _UK_GEOJSON = json.load(f)
-        _UK_GEOJSON_MTIME = mtime
-    return _UK_GEOJSON
-
-
-def _uk_map_view(gj: dict, width: int = 600, height: int = 520,
-                 pad: float = 1.1) -> tuple[dict, float]:
-    """Centre + zoom that frame the UK nations for a MapLibre `map` trace.
-
-    Derived from the geojson's bounding box (so it self-adjusts if the boundary
-    file is ever swapped) using the standard Web-Mercator fit: choose the zoom
-    that makes the bbox fill a reference viewport, binding on whichever axis is
-    tighter. The map re-centres responsively to its container but keeps this zoom.
-    """
-    lons: list[float] = []
-    lats: list[float] = []
-    for feat in gj.get("features", []):
-        geom = feat.get("geometry", {})
-        polys = geom.get("coordinates", [])
-        if geom.get("type") == "Polygon":
-            polys = [polys]
-        for poly in polys:
-            for ring in poly:
-                for lon, lat in ring:
-                    lons.append(lon)
-                    lats.append(lat)
-    if not lons:
-        return {"lat": 55.0, "lon": -3.5}, 4.0
-
-    # Clamp the northern extent: the Shetland Isles (~60.9°N) sit far offshore
-    # above largely empty ocean, and fitting them shrinks the main landmass to a
-    # speck. Cap the fit at 59.5°N so Shetland rests just past the top edge while
-    # the mainland fills the frame. (This is a UK-nations map, so a fixed cap is
-    # appropriate rather than a general heuristic.)
-    min_lon, max_lon = min(lons), max(lons)
-    min_lat = min(lats)
-    max_lat = min(max(lats), 59.5)
-    center = {"lon": (min_lon + max_lon) / 2, "lat": (min_lat + max_lat) / 2}
-
-    def _merc(lat: float) -> float:
-        s = min(max(math.sin(math.radians(lat)), -0.9999), 0.9999)
-        return math.log((1 + s) / (1 - s)) / 2
-
-    world = 512.0  # MapLibre logical tile size
-    lat_frac = (_merc(max_lat) - _merc(min_lat)) / math.pi * pad
-    lon_frac = (max_lon - min_lon) / 360 * pad
-    lat_zoom = math.log2(height / world / lat_frac) if lat_frac > 0 else 4.0
-    lon_zoom = math.log2(width / world / lon_frac) if lon_frac > 0 else 4.0
-    zoom = max(0.0, min(lat_zoom, lon_zoom, 18.0))
-    return center, zoom
-
-# jobs.ac.uk categorises by subject discipline (21) rather than the old six
-# job-types, so the palette must keep up to 8 simultaneously-shown disciplines
-# (the multi-category charts fold to top-8-by-volume + grey "Other") mutually
-# distinguishable under colour-vision deficiency. Plotly's Light24+Dark24 has many
-# pairs that collapse under CVD, so we replace it with a verified CVD-safe set.
-#
-# Base = the Okabe-Ito 8-colour CVD-safe palette (7 chromatic hues + a dark
-# anchor: Okabe's pure black is swapped for #3B2C5E, a near-black blue-violet that
-# reads as a "dark" series on white yet harmonises with _ACCENT/_INK; it behaves
-# identically to black under CVD simulation). Extended to 12 by a greedy search
-# that, at each step, added the hue MAXIMISING the minimum pairwise CIELAB dE of
-# the whole set under simulated protanopia, deuteranopia AND tritanopia (Machado
-# 2009 matrices, sRGB->linear->simulate->CIELAB). The four extensions
-# (#682727 -> #8D0202 -> #EA3E3E -> #DCAF6A) form a maroon->red->bright-red->tan
-# family separated mainly by LUMINANCE: past ~8 hues, lightness is the only axis a
-# dichromat can still resolve, so the optimiser packs the extras there rather than
-# inventing "new" hues that would collapse onto the base.
-#
-# VERIFIED (Machado 2009, CIEDE76; reproduced independently): worst-case
-# (tritanopia) minimum pairwise dE = 16.05 across ALL 12 colours
-# (normal 26.43 / protan 18.11 / deutan 16.23 / tritan 16.05), comfortably above
-# the ~10-11 "categorically distinct" threshold. CRUCIALLY, because that floor
-# holds over the FULL set, ANY subset -- including whichever arbitrary top-8-by-
-# volume disciplines a chart folds to -- is guaranteed >= 16.05 under every CVD
-# type. That dissolves the old Light24+Dark24 collapsing-pair problem regardless
-# of which 8 series surface, which is exactly why stable_per_slug is safe here.
 _QUALITATIVE = [
     "#E69F00",  # Okabe-Ito orange
     "#56B4E9",  # Okabe-Ito sky blue
@@ -251,46 +155,6 @@ def _empty(msg: str = _NO_DATA_MSG) -> go.Figure:
 
 # ── Overview charts ───────────────────────────────────────────────────────────
 
-def daily_jobs_line(rows: list[dict]) -> go.Figure:
-    """Line chart: new jobs per day with optional 7-day rolling average.
-
-    Days with no new postings (weekends, mostly) produce no row in the query,
-    so the series is reindexed onto a contiguous daily range and zero-filled
-    BEFORE the rolling mean — otherwise the average skips quiet days entirely
-    and reads too high.
-    """
-    if not rows:
-        return _empty()
-    df = pd.DataFrame(rows)
-    df["day"] = pd.to_datetime(df["day"])
-    df = df.sort_values("day").set_index("day")
-    full = pd.date_range(df.index.min(), df.index.max(), freq="D")
-    df = df.reindex(full, fill_value=0).rename_axis("day").reset_index()
-    df["rolling_7d"] = df["job_count"].rolling(7, min_periods=1).mean().round(1)
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df["day"], y=df["job_count"],
-        mode="lines+markers", name="Daily",
-        line=dict(color=_ACCENT, width=1.5), opacity=0.5,
-    ))
-    if len(df) >= 3:
-        fig.add_trace(go.Scatter(
-            x=df["day"], y=df["rolling_7d"],
-            mode="lines", name="7-day avg",
-            line=dict(color="#F77F00", width=2.5, shape="spline"),
-            fill="tozeroy", fillcolor="rgba(247, 127, 0, 0.10)",
-        ))
-    fig.update_layout(
-        title="New job postings per day",
-        xaxis=dict(title="Date", tickformat="%d %b %Y"),
-        yaxis=dict(title="New jobs"),
-        hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02),
-    )
-    return _style_fig(fig)
-
-
 def category_weekly_bar(rows: list[dict]) -> go.Figure:
     """Stacked bar: weekly postings per discipline (top disciplines + Other)."""
     if not rows:
@@ -342,151 +206,7 @@ def category_share_area(rows: list[dict]) -> go.Figure:
     return _style_fig(fig)
 
 
-def seasonal_bar(rows: list[dict]) -> go.Figure:
-    """Stacked bar: postings per month per discipline (top + Other)."""
-    if not rows:
-        return _empty()
-    df = pd.DataFrame(rows)
-    df = _fold_categories(df, "job_count")
-    df = df.groupby(["month", "category"], as_index=False)["job_count"].sum()
-    fig = px.bar(
-        df, x="month", y="job_count", color="category",
-        color_discrete_map=_PALETTE,
-        category_orders={"category": _ordered_categories(df["category"].unique())},
-        labels={"month": "Month", "job_count": "Jobs", "category": "Discipline"},
-        title="Monthly postings by discipline",
-        barmode="stack",
-        text_auto=False,
-    )
-    for trace in fig.data:
-        trace.name = _label(trace.name)
-    fig.update_layout(
-        legend_title_text="Discipline",
-        hovermode="x unified",
-        xaxis=dict(tickangle=-45),
-    )
-    return _style_fig(fig)
-
-
-def salary_inflation_line(rows: list[dict]) -> go.Figure:
-    """Multi-line chart: average salary floor per discipline per month.
-
-    Averaging the long tail would be misleading, so rather than fold into an
-    "Other" line we show only the best-represented disciplines (most months of
-    data) — keeping the chart readable with 21 disciplines in play.
-    """
-    if not rows:
-        return _empty()
-    df = pd.DataFrame(rows)
-    top = df.groupby("category").size().sort_values(ascending=False).head(_TOP_N).index
-    df = df[df["category"].isin(top)]
-    trimmed = df["category"].nunique() < pd.DataFrame(rows)["category"].nunique()
-    fig = go.Figure()
-    for cat in df["category"].unique():
-        cat_df = df[df["category"] == cat].sort_values("month")
-        fig.add_trace(go.Scatter(
-            x=cat_df["month"], y=cat_df["avg_salary_min"],
-            name=_label(cat),
-            mode="lines+markers",
-            line=dict(color=_PALETTE.get(cat, "#888"), width=2),
-            hovertemplate=f"{_label(cat)}: £%{{y:,.0f}}<extra></extra>",
-        ))
-    title = "Average salary floor by discipline over time"
-    if trimmed:
-        title += f" (top {_TOP_N})"
-    fig.update_layout(
-        title=title,
-        xaxis_title="Month", yaxis_title="Avg salary floor (£)",
-        yaxis=dict(tickprefix="£", tickformat=","),
-        hovermode="x unified",
-        legend_title_text="Discipline",
-    )
-    return _style_fig(fig)
-
-
 # ── Roles charts ──────────────────────────────────────────────────────────────
-
-def title_frequency_bar(rows: list[dict]) -> go.Figure:
-    """Horizontal bar: most frequent words in job titles."""
-    if not rows:
-        return _empty()
-    df = pd.DataFrame(rows).sort_values("count")
-    fig = go.Figure(go.Bar(
-        x=df["count"], y=df["term"],
-        orientation="h",
-        marker_color=_ACCENT,
-        text=df["count"],
-        textposition="outside",
-        hovertemplate="%{y}: %{x} occurrences<extra></extra>",
-    ))
-    fig.update_layout(
-        title="Most frequent words in job titles",
-        xaxis_title="Occurrences", yaxis_title="",
-        margin=dict(l=120),
-    )
-    return _style_fig(fig)
-
-
-def category_growth_bar(rows: list[dict]) -> go.Figure:
-    """Horizontal bar: week-on-week % change per category."""
-    if not rows:
-        return _empty("No week-on-week data yet (need 2+ weeks)")
-    df = pd.DataFrame([r for r in rows if r["change_pct"] is not None])
-    if df.empty:
-        return _empty("No week-on-week data yet (need 2+ weeks)")
-    df["label"] = df["category"].map(_label)
-    df["colour"] = df["change_pct"].apply(lambda x: _POS if x >= 0 else _NEG)
-    df = df.sort_values("change_pct")
-    fig = go.Figure(go.Bar(
-        x=df["change_pct"], y=df["label"],
-        orientation="h",
-        marker_color=df["colour"],
-        text=df["change_pct"].apply(lambda x: f"{x:+.1f}%"),
-        textposition="outside",
-        hovertemplate="%{y}: %{x:+.1f}%<extra></extra>",
-    ))
-    fig.update_layout(
-        title="Category growth (week-on-week %)",
-        xaxis_title="Change (%)", yaxis_title="",
-        xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor="grey"),
-    )
-    return _style_fig(fig)
-
-
-def salary_box_by_category(rows: list[dict]) -> go.Figure:
-    """Range bar (min–max) per category for the most recent week."""
-    if not rows:
-        return _empty()
-    df = pd.DataFrame(rows)
-    df = df.sort_values("week").groupby("category").last().reset_index()
-    df["label"] = df["category"].map(_label)
-    df = df.dropna(subset=["avg_salary_min", "avg_salary_max"])
-    df = df.sort_values("avg_salary_min", ascending=False)
-    fig = go.Figure()
-    for _, row in df.iterrows():
-        color = _PALETTE.get(row["category"], "#888888")
-        fig.add_trace(go.Bar(
-            name=row["label"],
-            x=[row["avg_salary_max"] - row["avg_salary_min"]],
-            y=[row["label"]],
-            base=[row["avg_salary_min"]],
-            orientation="h",
-            marker_color=color,
-            hovertemplate=(
-                f"{row['label']}<br>"
-                f"Avg min: £{row['avg_salary_min']:,.0f}<br>"
-                f"Avg max: £{row['avg_salary_max']:,.0f}<extra></extra>"
-            ),
-        ))
-    fig.update_layout(
-        title="Average salary range by category (most recent week)",
-        xaxis=dict(title="Salary (£)", tickprefix="£", tickformat=","),
-        yaxis_title="",
-        barmode="overlay",
-        showlegend=False,
-    )
-    return _style_fig(fig)
-
 
 # ── Institutions charts ───────────────────────────────────────────────────────
 
@@ -577,34 +297,6 @@ def institution_salary_scatter(rows: list[dict]) -> go.Figure:
     return _style_fig(fig)
 
 
-def longevity_histogram(rows: list[dict]) -> go.Figure:
-    """Bar chart: distribution of how many days jobs stay visible in the listings."""
-    if not rows:
-        return _empty()
-    df = pd.DataFrame(rows)
-    df = df[df["days_visible"] >= 0]
-    if df.empty:
-        return _empty()
-    fig = go.Figure(go.Bar(
-        x=df["days_visible"], y=df["job_count"],
-        marker_color=_ACCENT,
-        hovertemplate="Visible %{x} day(s): %{y} jobs<extra></extra>",
-    ))
-    maxd = int(df["days_visible"].max())
-    fig.update_layout(
-        title="How long jobs stay visible in the listings",
-        # Bars sit on integer day counts; frame them on [-0.5, max+0.5] so the
-        # first bar isn't clipped and Plotly doesn't pad in a meaningless "-1"
-        # tick. Force 1-day ticks only on a short span; let Plotly thin them out
-        # when the visibility range is wide.
-        xaxis=dict(title="Days visible", range=[-0.5, maxd + 0.5],
-                   **({"dtick": 1} if maxd <= 21 else {})),
-        yaxis_title="Number of jobs",
-        bargap=0.1,
-    )
-    return _style_fig(fig)
-
-
 def contract_type_bar(rows: list[dict]) -> go.Figure:
     """Stacked bar: permanent vs fixed-term contracts per week."""
     if not rows:
@@ -657,238 +349,7 @@ def hours_bar(rows: list[dict]) -> go.Figure:
     return _style_fig(fig)
 
 
-def new_vs_repeat_bar(rows: list[dict]) -> go.Figure:
-    """Stacked bar: new vs returning institutions per week."""
-    if not rows:
-        return _empty()
-    df = pd.DataFrame(rows)
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=df["week"], y=df["new_count"],
-        name="First-time recruiters",
-        marker_color=_POS,
-        hovertemplate="Week %{x}<br>First-time: %{y}<extra></extra>",
-    ))
-    fig.add_trace(go.Bar(
-        x=df["week"], y=df["repeat_count"],
-        name="Returning recruiters",
-        marker_color=_ACCENT,
-        hovertemplate="Week %{x}<br>Returning: %{y}<extra></extra>",
-    ))
-    fig.update_layout(
-        title="New vs returning institutions per week",
-        xaxis_title="ISO week", yaxis_title="Institutions",
-        barmode="stack",
-        hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02),
-    )
-    return _style_fig(fig)
-
-
-def seasonal_heatmap(rows: list[dict]) -> go.Figure:
-    """Heatmap: job postings per month per category."""
-    if not rows:
-        return _empty()
-    df = pd.DataFrame(rows)
-    month_map = {
-        "01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr", "05": "May", "06": "Jun",
-        "07": "Jul", "08": "Aug", "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec"
-    }
-    df["month_label"] = df["month_num"].map(month_map)
-
-    # Pivot to create a 2D matrix
-    pivot = df.pivot(index="category", columns="month_label", values="job_count").fillna(0)
-
-    # Reorder columns to standard calendar year
-    month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    cols = [c for c in month_order if c in pivot.columns]
-    pivot = pivot[cols]
-
-    y_labels = [_label(c) for c in pivot.index]
-
-    fig = go.Figure(data=go.Heatmap(
-        z=pivot.values,
-        x=pivot.columns,
-        y=y_labels,
-        colorscale="Blues",
-        hovertemplate="Category: %{y}<br>Month: %{x}<br>Postings: %{z}<extra></extra>"
-    ))
-    fig.update_layout(
-        title="Postings seasonality heatmap",
-        xaxis_title="Month of year",
-        yaxis_title="",
-    )
-    return _style_fig(fig)
-
-
-def recruitment_window_line(rows: list[dict]) -> go.Figure:
-    """Line: average days between posting and application closing."""
-    if not rows:
-        return _empty()
-    df = pd.DataFrame(rows).sort_values("week")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df["week"], y=df["avg_window_days"],
-        mode="lines+markers", name="Apply window",
-        line=dict(color=_ACCENT, width=2.5, shape="spline"),
-        fill="tozeroy", fillcolor="rgba(67, 97, 238, 0.10)",
-        hovertemplate="Week %{x}<br>Avg Apply Window: %{y:.1f} days<extra></extra>"
-    ))
-    fig.update_layout(
-        title="Average application window length (days)",
-        xaxis_title="ISO week",
-        yaxis_title="Days (closing − posted)",
-        hovermode="x unified",
-    )
-    return _style_fig(fig)
-
-
-def market_concentration_line(rows: list[dict]) -> go.Figure:
-    """Line: weekly recruiting HHI score indicating market diversity."""
-    if not rows:
-        return _empty()
-    df = pd.DataFrame(rows).sort_values("week")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df["week"], y=df["hhi"],
-        mode="lines+markers", name="HHI Index",
-        line=dict(color="#7209B7", width=2.5, shape="spline"),
-        fill="tozeroy", fillcolor="rgba(114, 9, 183, 0.09)",
-        hovertemplate="Week %{x}<br>HHI Concentration: %{y}<br>Volume: %{customdata} jobs<extra></extra>",
-        customdata=df["total_jobs"]
-    ))
-    fig.add_hline(y=1500, line_dash="dash", line_color="green", annotation_text="Competitive (<1500)")
-    fig.add_hline(y=2500, line_dash="dash", line_color="orange", annotation_text="Concentrated (>2500)")
-    fig.update_layout(
-        title="Recruitment concentration index (HHI)",
-        xaxis_title="ISO week",
-        yaxis_title="HHI score",
-        hovermode="x unified",
-    )
-    return _style_fig(fig)
-
-
-def salary_percentile_bands(rows: list[dict]) -> go.Figure:
-    """Line with filled area: 25th–75th percentile salary floor bands."""
-    if not rows:
-        return _empty()
-    df = pd.DataFrame(rows).sort_values("week")
-    fig = go.Figure()
-    
-    # 25th percentile boundary (invisible line)
-    fig.add_trace(go.Scatter(
-        x=df["week"], y=df["p25"],
-        mode="lines", line=dict(width=0),
-        showlegend=False, hoverinfo="skip"
-    ))
-    
-    # 75th percentile boundary with fill to next trace (25th)
-    fig.add_trace(go.Scatter(
-        x=df["week"], y=df["p75"],
-        mode="lines", fill="tonexty",
-        fillcolor="rgba(76, 114, 176, 0.15)",
-        line=dict(width=0),
-        name="25th-75th Percentile Band",
-    ))
-    
-    # Median (50th percentile)
-    fig.add_trace(go.Scatter(
-        x=df["week"], y=df["p50"],
-        mode="lines+markers", name="Median Salary Floor",
-        line=dict(color=_ACCENT, width=2.5),
-        hovertemplate="Week %{x}<br>Median Floor: £%{y:,.0f}<extra></extra>"
-    ))
-    
-    fig.update_layout(
-        title="Salary floor distribution bands over time",
-        xaxis_title="ISO week",
-        yaxis_title="Salary floor (£)",
-        yaxis=dict(tickprefix="£", tickformat=","),
-        hovermode="x unified",
-    )
-    return _style_fig(fig)
-
-
-def keyword_premium_bar(rows: list[dict]) -> go.Figure:
-    """Horizontal bar: wage premium of words in job titles relative to category average."""
-    if not rows:
-        return _empty()
-    df = pd.DataFrame(rows).head(15).sort_values("premium_pct")
-    df["colour"] = df["premium_pct"].apply(lambda x: _POS if x >= 0 else _NEG)
-    
-    fig = go.Figure(go.Bar(
-        x=df["premium_pct"], y=df["term"],
-        orientation="h",
-        marker_color=df["colour"],
-        text=df["premium_pct"].apply(lambda x: f"{x:+.1f}%"),
-        textposition="outside",
-        hovertemplate="Term: %{y}<br>Salary Premium: %{x:+.1f}%<br>Avg Salary: £%{customdata:,.0f}<extra></extra>",
-        customdata=df["avg_salary"]
-    ))
-    fig.update_layout(
-        title="Salary premium by title keyword (vs. category baseline)",
-        xaxis_title="Salary premium (%)",
-        yaxis_title="",
-        xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor="grey"),
-    )
-    return _style_fig(fig)
-
-
-def permanent_ratio_line(rows: list[dict]) -> go.Figure:
-    """Line: permanent contracts as a percentage share of weekly postings."""
-    if not rows:
-        return _empty()
-    df = pd.DataFrame(rows)
-    pivoted = df.pivot(index="week", columns="contract_type", values="job_count").fillna(0)
-    if "permanent" not in pivoted.columns:
-        pivoted["permanent"] = 0
-    totals = pivoted.sum(axis=1)
-    pivoted["ratio"] = (pivoted["permanent"] / totals * 100).round(1)
-    pivoted = pivoted.reset_index()
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=pivoted["week"], y=pivoted["ratio"],
-        mode="lines+markers", name="% Permanent",
-        line=dict(color=_POS, width=2.5, shape="spline"),
-        fill="tozeroy", fillcolor="rgba(6, 167, 125, 0.10)",
-        hovertemplate="Week %{x}<br>Permanent Jobs: %{y}%<extra></extra>"
-    ))
-    fig.update_layout(
-        title="Permanent contract share trend (%)",
-        xaxis_title="ISO week",
-        yaxis_title="Permanent contracts (%)",
-        yaxis=dict(range=[0, 100]),
-        hovermode="x unified",
-    )
-    return _style_fig(fig)
-
-
 # ── RSS-native charts (added 2026-06) ──────────────────────────────────────────
-
-def salary_transparency_line(rows: list[dict]) -> go.Figure:
-    """Line: weekly share of postings that don't disclose a parseable salary."""
-    if not rows:
-        return _empty()
-    df = pd.DataFrame(rows).sort_values("week")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df["week"], y=df["undisclosed_pct"],
-        mode="lines+markers", name="% undisclosed",
-        line=dict(color="#F77F00", width=2.5, shape="spline"),
-        fill="tozeroy", fillcolor="rgba(247, 127, 0, 0.10)",
-        customdata=df[["undisclosed", "total"]].values,
-        hovertemplate=("Week %{x}<br>Undisclosed: %{y}% "
-                       "(%{customdata[0]} of %{customdata[1]})<extra></extra>"),
-    ))
-    fig.update_layout(
-        title="Salary transparency: share of postings hiding pay",
-        xaxis_title="ISO week", yaxis_title="Salary not disclosed (%)",
-        yaxis=dict(range=[0, 100]),
-        hovermode="x unified",
-    )
-    return _style_fig(fig)
-
 
 def salary_distribution_hist(rows: list[dict]) -> go.Figure:
     """Histogram: distribution of advertised salary floors."""
@@ -1146,49 +607,6 @@ def region_category_heatmap(rows: list[dict]) -> go.Figure:
         xaxis=dict(tickangle=-30),
     )
     return _style_fig(fig)
-
-
-def region_choropleth(rows: list[dict]) -> go.Figure:
-    """Choropleth map: job postings shaded by UK nation.
-
-    Uses the MapLibre `choroplethmap` trace on a blank ("white-bg") basemap —
-    no tiles, no token, fully offline — which renders the polygons on a flat
-    projection that is immune to geojson winding order. See `_uk_geojson`.
-    """
-    if not rows:
-        return _empty(_NO_GEO_MSG)
-    df = pd.DataFrame(rows)
-    df = df[df["region"].isin(_UK_NATIONS)]
-    if df.empty:
-        return _empty("No UK-nation location data yet")
-    # Pad nations with no postings to zero so they still draw on the map
-    # instead of leaving a hole in the UK outline.
-    df = (df.set_index("region")["job_count"]
-            .reindex(_UK_NATIONS, fill_value=0)
-            .rename_axis("region").reset_index())
-    gj = _uk_geojson()
-    center, zoom = _uk_map_view(gj)
-    fig = go.Figure(go.Choroplethmap(
-        geojson=gj,
-        locations=df["region"],
-        z=df["job_count"],
-        featureidkey="properties.name",
-        colorscale="Blues",
-        zmin=0,
-        # A visible grey outline (not white) so nations with few/zero postings
-        # — which fill near-white on the pale end of Blues — still show their
-        # shape against the white basemap instead of vanishing.
-        marker_line_color="#6E7681", marker_line_width=1.0,
-        colorbar_title="Jobs",
-        hovertemplate="%{location}<br>%{z} jobs<extra></extra>",
-    ))
-    fig = _style_fig(fig)
-    fig.update_layout(
-        title="UK job postings by nation",
-        map=dict(style="white-bg", center=center, zoom=zoom),
-        margin=dict(l=10, r=10, t=70, b=10),
-    )
-    return fig
 
 
 def posting_volume_line(rows: list[dict]) -> go.Figure:
@@ -1824,5 +1242,110 @@ def precarity_mix_bar(rows: list[dict]) -> go.Figure:
         yaxis=dict(title="", categoryorder="array", categoryarray=list(df["label"])),
         legend=dict(orientation="h", yanchor="top", y=-0.12, x=0),
         margin=dict(l=200, b=110),
+    )
+    return _style_fig(fig)
+
+
+# ── Added September 2026 (dashboard review) ──────────────────────────────────
+
+def salary_by_discipline_bar(rows: list[dict]) -> go.Figure:
+    """Horizontal bar: median full-time salary floor per discipline with a p25-p75 whisker.
+
+    The cross-sectional pay-by-discipline view that replaced the "most recent
+    week" range chart: one bar per discipline over the whole window, so a thin
+    week cannot swing it. Values and the IQR ride on hover; the axis carries the
+    scale.
+    """
+    if not rows:
+        return _empty("Not enough salaried full-time jobs yet")
+    df = pd.DataFrame(rows).sort_values("median_salary")
+    df["label"] = df["category"].map(_label)
+    fig = go.Figure(go.Bar(
+        x=df["median_salary"], y=df["label"], orientation="h",
+        marker_color=_ACCENT,
+        error_x=dict(type="data", symmetric=False,
+                     array=df["p75"] - df["median_salary"],
+                     arrayminus=df["median_salary"] - df["p25"],
+                     color=_MUTED, thickness=1.5, width=4),
+        customdata=df[["p25", "p75", "n"]].values,
+        hovertemplate=("%{y}<br>Median floor £%{x:,.0f}<br>"
+                       "p25 £%{customdata[0]:,.0f} - p75 £%{customdata[1]:,.0f}<br>"
+                       "%{customdata[2]} full-time salaried adverts<extra></extra>"),
+    ))
+    fig.update_layout(
+        title="Median advertised salary floor by discipline (full-time)",
+        xaxis=dict(title="Salary floor (£)", tickprefix="£", tickformat=","),
+        yaxis_title="", margin=dict(l=220), showlegend=False,
+    )
+    return _style_fig(fig)
+
+
+def tag_breakdown_bar(rows: list[dict], title: str, limit: int = 15) -> go.Figure:
+    """Horizontal bar of adverts per tag (sub-discipline or professional-services area).
+
+    Count is the bar; the fixed-term share and median full-time salary floor
+    ride on hover so the drill-down answers "how many, how precarious, what
+    pay" in one mark. Largest on top; capped at `limit` tags.
+    """
+    if not rows:
+        return _empty("No tags recorded for this selection yet")
+    df = pd.DataFrame(rows).sort_values("n", ascending=False).head(limit).iloc[::-1]
+    df["ft_txt"] = df["fixed_term_pct"].apply(
+        lambda v: "n/a" if v is None or pd.isna(v) else f"{v:.0f}%")
+    df["sal_txt"] = df["median_salary"].apply(
+        lambda v: "n/a" if v is None or pd.isna(v) else f"£{v:,.0f}")
+    fig = go.Figure(go.Bar(
+        x=df["n"], y=df["name"], orientation="h", marker_color=_ACCENT,
+        text=df["n"], textposition="outside",
+        customdata=df[["ft_txt", "sal_txt", "n_contracted"]].values,
+        hovertemplate=("%{y}<br>%{x} adverts<br>Fixed-term: %{customdata[0]} "
+                       "(of %{customdata[2]} contracted)<br>"
+                       "Median full-time floor: %{customdata[1]}<extra></extra>"),
+    ))
+    fig.update_layout(title=title, xaxis_title="Adverts", yaxis_title="",
+                      margin=dict(l=220), showlegend=False)
+    return _style_fig(fig)
+
+
+def attribution_dumbbell(rows: list[dict]) -> go.Figure:
+    """Dumbbell per discipline: adverts counted once (first-listed subject) vs under every subject.
+
+    The honest explanation of why discipline counts sum to more than the advert
+    total: a light dot for the one-label count, a dark dot for the every-tag
+    count, joined by a grey bar, with the ratio printed beside the dark dot.
+    Sorted so the biggest undercounts sit at the top.
+    """
+    if not rows:
+        return _empty()
+    df = pd.DataFrame(rows)
+    df["label"] = df["category"].map(_label)
+    df = df.sort_values(["ratio"], na_position="last")
+    xs, ys = [], []
+    for _, r in df.iterrows():
+        xs += [r["first_listed"], r["every_tag"], None]
+        ys += [r["label"], r["label"], None]
+    ratio_txt = df["ratio"].apply(lambda v: "" if v is None or pd.isna(v) else f"  ×{v:.1f}")
+    fig = go.Figure([
+        go.Scatter(x=xs, y=ys, mode="lines", line=dict(color=_GRID, width=6),
+                   hoverinfo="skip", showlegend=False),
+        go.Scatter(x=df["first_listed"], y=df["label"], mode="markers",
+                   name="Counted once (first-listed subject)",
+                   marker=dict(color="#9EC5F4", size=12, line=dict(color="white", width=2)),
+                   hovertemplate="%{y}<br>Counted once: %{x}<extra></extra>"),
+        go.Scatter(x=df["every_tag"], y=df["label"], mode="markers+text",
+                   name="Counted under every subject carried",
+                   text=ratio_txt, textposition="middle right",
+                   textfont=dict(size=12, color=_MUTED),
+                   marker=dict(color=_ACCENT, size=12, line=dict(color="white", width=2)),
+                   customdata=df[["first_scanned"]].values,
+                   hovertemplate=("%{y}<br>Every subject: %{x}<br>"
+                                  "(scraper's original first-scanned rule: %{customdata[0]})<extra></extra>")),
+    ])
+    fig.update_layout(
+        title="Counting each advert once undercounts most subjects",
+        xaxis=dict(title="Adverts (all time)", rangemode="tozero"),
+        yaxis=dict(title="", categoryorder="array", categoryarray=list(df["label"])),
+        legend=dict(orientation="h", yanchor="top", y=-0.12, x=0),
+        margin=dict(l=220, r=60, b=90),
     )
     return _style_fig(fig)
