@@ -26,8 +26,15 @@ All notable changes to this project are recorded here. Format loosely follows
   - `python -m analysis.report` crashed on imports removed in the review; it now
     uses `headline_stats` and `salary_by_discipline`.
   - Removed unused imports and the orphaned `dashboard/assets/uk_nations.geojson`.
+- Seniority classifier: "Assistant Teaching/Research/Clinical Professor" now grades
+  as Lecturer / Assistant Prof and "Associate Clinical/Teaching/Research Professor"
+  as Associate Prof / Reader, instead of both landing in Professor.
 
 ### Added
+- **`scripts/career_stage_chart.py`** — three-panel PNG of UK adverts by academic
+  career stage: fixed-term share, share giving no pay figure, and share with 14 days
+  or less to apply. Companion to `docs/linkedin-career-stage.md`, which replaces the
+  retired precarity-by-discipline draft.
 - **September 2026 dashboard review implemented** (`docs/dashboard-review-2026-09.md`):
   - Every windowed query now keys off `date_posted`; `first_seen` is provenance only.
   - Weekly series (`category_weekly_counts`, `contract_type_trend`, `hours_trend`,

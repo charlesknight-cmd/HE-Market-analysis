@@ -36,6 +36,11 @@ class TestClassifiers:
         ("Post Doctoral Research Associate", "Research Fellow / Postdoc"),
         ("Research Associate (PhD required)", "Research Fellow / Postdoc"),
         ("Doctoral College Manager", "Manager / Officer"),
+        # prefixed titles grade as their prefix, not as chairs
+        ("Assistant Teaching Professor (Fixed Term)", "Lecturer / Assistant Prof"),
+        ("Assistant Research Professor", "Lecturer / Assistant Prof"),
+        ("Associate Clinical Professor in Orthodontics", "Associate Prof / Reader"),
+        ("Professor of Nuclear Engineering", "Professor"),
     ])
     def test_seniority_agrees_with_studentship_rule(self, title, expected):
         assert _classify_seniority(title) == expected

@@ -221,9 +221,11 @@ def is_studentship(title: str | None) -> bool:
 # scientists, and the professional-services vocabulary that made
 # "Other / Unclassified" the second-largest band.
 _SENIORITY_RULES = [
-    ("Associate Prof / Reader",   r"associate professor|\breader\b"),
+    # "Associate Clinical Professor", "Assistant Teaching Professor" (Cambridge's
+    # lecturer-grade title) and the like are graded as their prefix, not as chairs.
+    ("Associate Prof / Reader",   r"associate (?:clinical |teaching |research )?professor|\breader\b"),
     ("Senior Lecturer",           r"senior lecturers?|principal lecturers?|\bsl/ap\b"),
-    ("Lecturer / Assistant Prof", r"\blecturers?\b|lectureship|assistant professor"),
+    ("Lecturer / Assistant Prof", r"\blecturers?\b|lectureship|assistant (?:clinical |teaching |research )?professor"),
     ("Professor",                 r"\bprofessor\b|\bchair\b|\bprof\b"),
     ("Teaching Fellow / Tutor",   r"teaching fellow|teaching associate|teaching assistant|\btutor\b|\bteacher\b|"
                                   r"\bdemonstrator\b|\binstructor\b|hourly paid teaching|graduate teaching"),

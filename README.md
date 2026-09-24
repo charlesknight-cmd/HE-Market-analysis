@@ -44,7 +44,7 @@ analysis/            Read-only analytics over the DB
 dashboard/           Streamlit UI
   app.py               Page layout (Overview · Trends · Pay · Contracts & Timing · Roles · Institutions · Data), filters, cached loaders
   charts.py            Reusable Plotly figure builders + shared styling
-scripts/             One-off maintenance and reporting scripts (reparse.py salary backfill, backfill_disciplines.py, enrich_backfill.py, backup_db.py, casualisation_chart.py and attribution_chart.py PNGs for sharing)
+scripts/             One-off maintenance and reporting scripts (reparse.py salary backfill, backfill_disciplines.py, enrich_backfill.py, backup_db.py, casualisation_chart.py, attribution_chart.py and career_stage_chart.py PNGs for sharing)
 tests/               pytest suite (parser tests)
 deploy/              systemd unit, nginx config, setup script
 docs/                Design notes & reference (architecture, data dictionary, enrichment scope)
