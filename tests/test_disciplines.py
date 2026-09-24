@@ -309,11 +309,24 @@ class TestDisciplineStorage:
         assert by_id == {"A1": "politics-and-government,economics", "L1": "academic-or-research"}
 
 
+def _collected_since(path, days_ago):
+    """Backdate every first_seen: bulk_upsert stamps 'now', which would put the
+    start of collection (and so the first complete week) after LAST_WEEK."""
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("UPDATE jobs SET first_seen = ?",
+                     ((date.today() - timedelta(days=days_ago)).isoformat() + "T07:00:00",))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 class TestAnalysisUsesViews:
     def test_weekly_counts_count_each_discipline(self, tmp_db):
         from analysis.trends import category_weekly_counts, headline_stats
         bulk_upsert([_job("A1", "economics")])
         bulk_upsert([_job("A1", "law")])
+        _collected_since(tmp_db, 30)
         counts = {r["category"]: r["job_count"] for r in category_weekly_counts(weeks=4)}
         assert counts == {"economics": 1, "law": 1}
         assert headline_stats()["disciplines"] == 2
@@ -326,3 +339,39 @@ class TestAnalysisUsesViews:
         assert len(rows) == 1
         assert rows[0]["job_count"] == 3
         assert set(rows[0]["category_list"].split(",")) == {"economics", "law"}
+
+
+class TestWeeklySeries:
+    def test_weeks_before_collection_are_dropped(self, tmp_db):
+        """An advert posted before the first scrape only survives if it was still
+        open that day, so weeks before collection began must not be plotted."""
+        from analysis.trends import category_weekly_counts
+        early = (date.today() - timedelta(days=60)).isoformat()
+        bulk_upsert([_job("OLD", "law", date_posted=early), _job("NEW", "law")])
+        _collected_since(tmp_db, 30)
+        rows = category_weekly_counts()
+        assert [r["job_count"] for r in rows] == [1]
+
+    def test_week_key_is_the_monday(self, tmp_db):
+        from analysis.trends import category_weekly_counts
+        bulk_upsert([_job("A1", "law")])
+        _collected_since(tmp_db, 30)
+        (row,) = category_weekly_counts()
+        monday = date.fromisoformat(row["week"])
+        assert monday.weekday() == 0
+        assert monday <= date.fromisoformat(LAST_WEEK) < monday + timedelta(days=7)
+
+    def test_new_year_week_is_one_bucket(self, tmp_db):
+        """strftime('%W') split Mon 28 Dec 2026 - Sun 3 Jan 2027 into W52 and W00."""
+        from analysis.trends import _week_start
+        days = ["2026-12-28", "2026-12-31", "2027-01-01", "2027-01-03"]
+        sql = "SELECT " + ", ".join(_week_start(f"'{d}'") for d in days)
+        assert set(_rows(tmp_db, sql)[0]) == {"2026-12-28"}
+        assert _rows(tmp_db, "SELECT " + _week_start("'2027-01-04'"))[0][0] == "2027-01-04"
+
+    def test_hidden_pay_excludes_international(self, tmp_db):
+        from analysis.trends import headline_stats
+        bulk_upsert([_job("UK1", "law", region="England"),
+                     _job("UK2", "law", region="England", salary_min=None, salary_max=None),
+                     _job("INT", "law", region="International", salary_min=None, salary_max=None)])
+        assert headline_stats()["hidden_pay_pct"] == 50.0

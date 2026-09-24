@@ -12,12 +12,28 @@ from db.schema import get_connection
 # first saw it and carries a 1,836-advert backfill spike in the week the scraper
 # went live (26 May 2026).
 
-# Weekly series exclude the current, partial ISO week: plotting it as if complete
-# makes every series end in a false drop and turns week-on-week growth negative
-# on any day but Sunday. `date('now', '-6 days', 'weekday 1')` is the Monday on
-# or before today (SQLite's 'weekday 1' rolls forward to the next Monday, so
-# stepping back six days first makes it land on the current week's Monday).
-_COMPLETE_WEEKS = "date_posted < date('now', '-6 days', 'weekday 1')"
+# Weeks run Monday to Sunday and are keyed by their Monday (YYYY-MM-DD).
+# `date(x, '-6 days', 'weekday 1')` is the Monday on or before x (SQLite's
+# 'weekday 1' rolls forward to the next Monday, so stepping back six days first
+# makes it land on x's own week). strftime('%W') is not used: it restarts at W00
+# on 1 January, splitting the New Year week into two partial buckets.
+def _week_start(col: str) -> str:
+    return f"date({col}, '-6 days', 'weekday 1')"
+
+
+# Weekly series cover complete weeks only, at both ends:
+# - the current, partial week is dropped: plotting it as if complete makes every
+#   series end in a false drop and turns week-on-week growth negative on any day
+#   but Sunday;
+# - weeks before collection began are dropped: date_posted reaches back to March
+#   2026, but an advert posted before the first scrape (26 May 2026) was only
+#   captured if it was still open that day, so those weeks undercount and read
+#   as a false ramp-up. The first complete week is the Monday on or after the
+#   first scrape.
+_COMPLETE_WEEKS = (
+    "date_posted >= (SELECT date(substr(MIN(first_seen), 1, 10), 'weekday 1') FROM jobs) "
+    "AND date_posted < " + _week_start("'now'")
+)
 
 # Retired job-type slugs (pre-June-2026 taxonomy) still ride on a few rows'
 # `category`; they are not disciplines, so discipline breakdowns skip them.
@@ -31,19 +47,20 @@ _NOT_LEGACY = "category NOT IN (" + ", ".join(f"'{x}'" for x in sorted(LEGACY_JO
 # `jobs.category` alone only records the facet a job was first scraped under.
 
 def category_weekly_counts(weeks: int = 52) -> list[dict]:
-    """Postings per discipline per complete ISO week (true posting date).
+    """Postings per discipline per complete week (true posting date).
 
-    A multi-discipline advert counts under each discipline. The current partial
-    week is excluded (see _COMPLETE_WEEKS); `weeks` bounds the history.
+    `week` is the week's Monday (YYYY-MM-DD). A multi-discipline advert counts
+    under each discipline. Partial weeks at either end are excluded (see
+    _COMPLETE_WEEKS); `weeks` bounds the history.
     """
     days = weeks * 7
     with get_connection() as conn:
         rows = conn.execute(
             f"""
             SELECT
-                strftime('%Y-W%W', date_posted) AS week,
+                {_week_start('date_posted')} AS week,
                 category,
-                COUNT(*)                          AS job_count
+                COUNT(*) AS job_count
             FROM jobs_by_discipline
             WHERE date_posted >= date('now', :offset)
               AND {_COMPLETE_WEEKS}
@@ -106,13 +123,13 @@ def category_growth_wow() -> list[dict]:
 
 
 def contract_type_trend(weeks: int = 52) -> list[dict]:
-    """Permanent vs fixed-term adverts per complete ISO week (true posting date)."""
+    """Permanent vs fixed-term adverts per complete week (true posting date)."""
     days = weeks * 7
     with get_connection() as conn:
         rows = conn.execute(
             f"""
             SELECT
-                strftime('%Y-W%W', date_posted) AS week,
+                {_week_start('date_posted')} AS week,
                 contract_type,
                 COUNT(*) AS job_count
             FROM jobs
@@ -128,13 +145,13 @@ def contract_type_trend(weeks: int = 52) -> list[dict]:
 
 
 def hours_trend(weeks: int = 52) -> list[dict]:
-    """Full-time / part-time / flexible adverts per complete ISO week (true posting date)."""
+    """Full-time / part-time / flexible adverts per complete week (true posting date)."""
     days = weeks * 7
     with get_connection() as conn:
         rows = conn.execute(
             f"""
             SELECT
-                strftime('%Y-W%W', date_posted) AS week,
+                {_week_start('date_posted')} AS week,
                 hours,
                 COUNT(*) AS job_count
             FROM jobs
@@ -176,6 +193,26 @@ def salary_distribution(days: int = 90) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+# PhD studentships are training places, not employment; they are 96% fixed-term
+# by nature and would inflate any fixed-term share, so precarity measures drop
+# them, and the seniority classifier gives them their own band. A title naming a
+# PhD is a studentship unless it is a post-doc ("Postdoctoral Researcher"
+# contains "doctoral researcher") or a job that asks for, or offers the option
+# of, a PhD.
+_STUDENTSHIP_RE = re.compile(
+    r"\bphd\b|\bdphil\b|studentship|"
+    r"doctoral (?:student|researcher|candidate|scholar|training|programmes?|programs?)", re.IGNORECASE)
+_NOT_STUDENTSHIP_RE = re.compile(
+    r"post[- ]?doc|option to (?:undertake|do|study|pursue)|\bphd (?:required|essential|holder|qualified)",
+    re.IGNORECASE)
+
+
+def is_studentship(title: str | None) -> bool:
+    """True if the advert is a PhD/doctoral studentship rather than a job."""
+    t = title or ""
+    return bool(_STUDENTSHIP_RE.search(t)) and not _NOT_STUDENTSHIP_RE.search(t)
+
+
 # Seniority bands, ordered most-specific first so first-match classification is correct
 # (e.g. "associate professor" must be tested before the bare "professor" rule).
 # Second pass (Sept 2026): plurals ("Maths Lecturers"), lectureships, "SL/AP",
@@ -191,9 +228,8 @@ _SENIORITY_RULES = [
     ("Teaching Fellow / Tutor",   r"teaching fellow|teaching associate|teaching assistant|\btutor\b|\bteacher\b|"
                                   r"\bdemonstrator\b|\binstructor\b|hourly paid teaching|graduate teaching"),
     ("Faculty (open rank)",       r"open[- ]rank|\bfaculty (?:position|member|post)|tenure[- ]track"),
-    ("Research Fellow / Postdoc", r"research fellow|post-?doctoral|\bpostdoc\b|research associate|research assistant|"
+    ("Research Fellow / Postdoc", r"research fellow|post[- ]?doctoral|\bpostdoc\b|research associate|research assistant|"
                                   r"\bresearcher\b|research scientist|\bscientist\b|\bfellowship\b|\bfellow\b"),
-    ("PhD / Studentship",         r"\bphd\b|\bdphil\b|doctoral|studentship"),
     ("Director / Head / Dean",    r"\bdirector\b|head of|\bdean\b|\bpro vice\b|\bvice-chancellor\b|\bprovost\b"),
     ("Manager / Officer",         r"\bmanager\b|\bofficer\b|\bco-?ordinator\b|\badministrator\b|\blead\b|"
                                   r"\bleader\b|\badvis[eo]r\b|\bconsultant\b|\bpartner\b"),
@@ -205,6 +241,12 @@ _SENIORITY_RULES = [
 
 
 def _classify_seniority(title: str) -> str:
+    # Studentships are tested first, with the same rule the precarity measures
+    # use (is_studentship), so "PhD Research Fellowship" or "Doctoral Researcher"
+    # is never read as a postdoc by the Research Fellow band's fellowship /
+    # researcher words, and "Doctoral College Manager" is not read as a PhD.
+    if is_studentship(title):
+        return "PhD / Studentship"
     t = (title or "").lower()
     for rank, pattern in _SENIORITY_RULES:
         if re.search(pattern, t):
@@ -353,9 +395,9 @@ def upcoming_deadlines(weeks_ahead: int = 8) -> list[dict]:
     """Count of currently-open jobs closing in each of the next `weeks_ahead` weeks."""
     with get_connection() as conn:
         rows = conn.execute(
-            """
-            SELECT strftime('%Y-W%W', closing_date) AS week,
-                   COUNT(*)                          AS job_count
+            f"""
+            SELECT {_week_start('closing_date')} AS week,
+                   COUNT(*) AS job_count
             FROM jobs
             WHERE closing_date IS NOT NULL
               AND closing_date >= date('now')
@@ -413,7 +455,9 @@ def salary_by_region(days: int = 180, min_jobs: int = 3) -> list[dict]:
 
     International is excluded: those figures are foreign salaries converted at
     the day's rate with under half disclosed, so a £ median is not comparable
-    (intl_vs_uk_profile compares disclosure rate instead).
+    (intl_vs_uk_profile compares disclosure rate instead). 'UK (unspecified)' is
+    excluded too: it is not a nation, just adverts whose page names no nation (a
+    handful), and salary_disclosure_by_group drops it for the same reason.
     """
     return [r for r in _median_salary_by("region", days, min_jobs)
             if r["group"] not in ("International", "UK (unspecified)")]
@@ -854,18 +898,6 @@ _LECTURER_TITLE_RE = re.compile(r"lecturer", re.IGNORECASE)
 BALANCED_BAND = (0.8, 1.25)
 
 
-# PhD studentships are training places, not employment; they are 96% fixed-term
-# by nature and would inflate any fixed-term share, so precarity measures drop
-# them. Matches the seniority band's PhD rule plus doctoral-student wording.
-_STUDENTSHIP_RE = re.compile(
-    r"\bphd\b|\bdphil\b|studentship|doctoral (?:student|researcher|candidate|scholar|training)", re.IGNORECASE)
-
-
-def is_studentship(title: str | None) -> bool:
-    """True if the advert is a PhD/doctoral studentship rather than a job."""
-    return bool(_STUDENTSHIP_RE.search(title or ""))
-
-
 def role_flags(title: str | None) -> tuple[bool, bool]:
     """(is_research_post, is_lecturer_post) from a job title."""
     t = title or ""
@@ -966,16 +998,18 @@ def recruitment_mix_by_discipline(days: int = 180, min_n: int = 40,
 def headline_stats(days: int = 90) -> dict:
     """The numbers the Overview leads with, each stated as a level, not a trend.
 
-    Weekly counts use the last two COMPLETE ISO weeks (true posting date) so the
+    Weekly counts use the last two COMPLETE weeks (true posting date) so the
     delta is week-vs-week, never partial-vs-full. Rates are over the last `days`
     days of postings. Studentships are excluded from the permanent share for the
-    same reason as in recruitment_mix_by_discipline.
+    same reason as in recruitment_mix_by_discipline. International adverts are
+    excluded from the hidden-pay share: their pay is often stated in a foreign
+    currency that never parses, which is not the same as hiding it.
     """
     with get_connection() as conn:
         total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         weeks = conn.execute(
             f"""
-            SELECT strftime('%Y-W%W', date_posted) AS week, COUNT(*) AS n
+            SELECT {_week_start('date_posted')} AS week, COUNT(*) AS n
             FROM jobs
             WHERE {_COMPLETE_WEEKS}
             GROUP BY week ORDER BY week DESC LIMIT 2
@@ -983,7 +1017,7 @@ def headline_stats(days: int = 90) -> dict:
         ).fetchall()
         recent = conn.execute(
             """
-            SELECT title, contract_type, salary_min,
+            SELECT title, contract_type, salary_min, region,
                    julianday(closing_date) - julianday(date_posted) AS window_days
             FROM jobs
             WHERE date_posted >= date('now', :offset)
@@ -1004,13 +1038,15 @@ def headline_stats(days: int = 90) -> dict:
     contracted = [r for r in recent if r["contract_type"] in ("permanent", "fixed-term")
                   and not is_studentship(r["title"])]
     n_recent = len(recent)
+    domestic = [r for r in recent if r["region"] != "International"]
     return {
         "total_jobs": total,
         "last_week": weeks[0]["n"] if weeks else 0,
         "last_week_label": weeks[0]["week"] if weeks else None,
         "prev_week": weeks[1]["n"] if len(weeks) > 1 else None,
         "median_window_days": round(_percentile(windows, 0.5)) if windows else None,
-        "hidden_pay_pct": round(100 * sum(r["salary_min"] is None for r in recent) / n_recent, 1) if n_recent else None,
+        "hidden_pay_pct": round(100 * sum(r["salary_min"] is None for r in domestic) / len(domestic), 1)
+                          if domestic else None,
         "permanent_pct": round(100 * sum(r["contract_type"] == "permanent" for r in contracted) / len(contracted), 1)
                          if contracted else None,
         "institutions": institutions,

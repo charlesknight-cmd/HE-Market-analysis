@@ -5,6 +5,28 @@ All notable changes to this project are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+- **Code review of the September 2026 dashboard review:**
+  - `is_studentship` matched "Postdoctoral Researcher" (it contains "doctoral
+    researcher") and "PhD required" job titles, so postdocs were dropped from
+    every fixed-term share. Post-docs and jobs that require or offer a PhD are
+    now excluded from the rule; it also catches doctoral-programme calls.
+    Re-check the market fixed-term share on the live DB before quoting it.
+  - The seniority classifier tests `is_studentship` first, so "PhD Research
+    Fellowship" / "Doctoral Researcher" are no longer read as postdocs, and the
+    bare `doctoral` rule ("Doctoral College Manager" as a PhD) is gone.
+  - Weekly series are keyed by the week's Monday (`YYYY-MM-DD`) instead of
+    `strftime('%Y-W%W')`, which restarted at W00 on 1 January and split the
+    New Year week into two partial "complete" weeks.
+  - Weekly series start at the first complete week of collection (the Monday on
+    or after the first scrape): earlier `date_posted` weeks only held adverts
+    still open on 26 May and plotted as a false ramp-up from March.
+  - The headline "Adverts hiding pay" excludes International adverts, whose
+    foreign-currency pay does not parse.
+  - `python -m analysis.report` crashed on imports removed in the review; it now
+    uses `headline_stats` and `salary_by_discipline`.
+  - Removed unused imports and the orphaned `dashboard/assets/uk_nations.geojson`.
+
 ### Added
 - **September 2026 dashboard review implemented** (`docs/dashboard-review-2026-09.md`):
   - Every windowed query now keys off `date_posted`; `first_seen` is provenance only.

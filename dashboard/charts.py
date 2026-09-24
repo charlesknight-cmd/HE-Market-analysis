@@ -1,9 +1,5 @@
 """Reusable Plotly figure builders."""
 
-import json
-import math
-from pathlib import Path
-
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -166,7 +162,7 @@ def category_weekly_bar(rows: list[dict]) -> go.Figure:
         df, x="week", y="job_count", color="category",
         color_discrete_map=_PALETTE,
         category_orders={"category": _ordered_categories(df["category"].unique())},
-        labels={"week": "ISO week", "job_count": "Jobs", "category": "Discipline"},
+        labels={"week": "Week commencing", "job_count": "Jobs", "category": "Discipline"},
         title="Weekly postings by discipline",
         barmode="stack",
     )
@@ -198,7 +194,7 @@ def category_share_area(rows: list[dict]) -> go.Figure:
         ))
     fig.update_layout(
         title="Discipline share of postings over time (%)",
-        xaxis_title="ISO week", yaxis_title="Share (%)",
+        xaxis_title="Week commencing", yaxis_title="Share (%)",
         yaxis=dict(range=[0, 100]),
         hovermode="x unified",
         legend_title_text="Discipline",
@@ -315,7 +311,7 @@ def contract_type_bar(rows: list[dict]) -> go.Figure:
         ))
     fig.update_layout(
         title="Permanent vs fixed-term contracts per week",
-        xaxis_title="ISO week", yaxis_title="Jobs",
+        xaxis_title="Week commencing", yaxis_title="Jobs",
         barmode="stack",
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
@@ -341,7 +337,7 @@ def hours_bar(rows: list[dict]) -> go.Figure:
         ))
     fig.update_layout(
         title="Full-time vs part-time jobs per week",
-        xaxis_title="ISO week", yaxis_title="Jobs",
+        xaxis_title="Week commencing", yaxis_title="Jobs",
         barmode="stack",
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
@@ -527,7 +523,7 @@ def upcoming_deadlines_bar(rows: list[dict]) -> go.Figure:
     ))
     fig.update_layout(
         title="Upcoming application deadlines (open jobs by closing week)",
-        xaxis_title="ISO week", yaxis_title="Jobs closing",
+        xaxis_title="Week commencing", yaxis_title="Jobs closing",
     )
     return _style_fig(fig)
 

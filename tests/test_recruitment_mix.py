@@ -5,7 +5,7 @@ from datetime import date
 import pytest
 
 import db.schema as schema
-from analysis.trends import is_studentship, mix_label, recruitment_mix_by_discipline, role_flags
+from analysis.trends import _classify_seniority, is_studentship, mix_label, recruitment_mix_by_discipline, role_flags
 from dashboard import charts
 from db.queries import bulk_upsert, set_disciplines
 
@@ -18,9 +18,27 @@ class TestClassifiers:
         ("DPhil in History", True), ("Doctoral Researcher (ESR)", True),
         ("Research Associate", False), ("Lecturer in Physics", False),
         ("Postdoctoral Research Fellow", False), (None, False),
+        # "Postdoctoral Researcher" contains "doctoral researcher"
+        ("Postdoctoral Researcher in Chemistry", False), ("Post-doctoral Researcher", False),
+        ("Post Doctoral Researcher", False),
+        ("Research Associate (PhD required)", False),
+        ("Research Technician (With Option to Undertake a PhD)", False),
+        ("PhD Studentship: Soho in Post-war London", True),
+        ("Call for Applications: Doctoral Programmes 2026/27", True),
     ])
     def test_is_studentship(self, title, expected):
         assert is_studentship(title) is expected
+
+    @pytest.mark.parametrize("title,expected", [
+        ("PhD Research Fellowship in Political Science", "PhD / Studentship"),
+        ("Doctoral Researcher (ESR)", "PhD / Studentship"),
+        ("Postdoctoral Researcher", "Research Fellow / Postdoc"),
+        ("Post Doctoral Research Associate", "Research Fellow / Postdoc"),
+        ("Research Associate (PhD required)", "Research Fellow / Postdoc"),
+        ("Doctoral College Manager", "Manager / Officer"),
+    ])
+    def test_seniority_agrees_with_studentship_rule(self, title, expected):
+        assert _classify_seniority(title) == expected
 
     @pytest.mark.parametrize("ratio,expected", [
         (6.2, "research"), (1.3, "research"), (float("inf"), "research"),

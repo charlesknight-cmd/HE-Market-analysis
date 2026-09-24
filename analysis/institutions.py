@@ -1,9 +1,7 @@
 """Institution-level queries: top recruiters, spikes, weekly trends."""
 
-from collections import defaultdict
-
+from analysis.trends import _COMPLETE_WEEKS, _week_start
 from db.schema import get_connection
-
 
 
 def top_institutions(days: int = 30, limit: int = 20) -> list[dict]:
@@ -32,18 +30,18 @@ def top_institutions(days: int = 30, limit: int = 20) -> list[dict]:
 
 
 def institution_weekly_trend(institution: str, weeks: int = 12) -> list[dict]:
-    """Weekly posting count for a single institution."""
+    """Postings per complete week for one institution (`week` = the week's Monday)."""
     days = weeks * 7
     with get_connection() as conn:
         rows = conn.execute(
             f"""
             SELECT
-                strftime('%Y-W%W', date_posted) AS week,
-                COUNT(*)                          AS job_count
+                {_week_start('date_posted')} AS week,
+                COUNT(*) AS job_count
             FROM jobs
             WHERE institution = :institution
               AND date_posted >= date('now', :offset)
-              AND date_posted < date('now', '-6 days', 'weekday 1')
+              AND {_COMPLETE_WEEKS}
             GROUP BY week
             ORDER BY week
             """,

@@ -120,7 +120,8 @@ happened to scan first — alphabetical order, which inflated `agriculture…` a
 
 Built in `dashboard/charts.py`, laid out across tabs in `dashboard/app.py`.
 Since the September 2026 review every windowed chart keys off `date_posted`;
-weekly series show every COMPLETE ISO week and ignore the lookback control;
+weekly series show every complete Monday–Sunday week since collection began
+(keyed by the week's Monday, `YYYY-MM-DD`) and ignore the lookback control;
 discipline breakdowns read `jobs_by_discipline` (a multi-discipline advert
 counts under each) and skip `config.LEGACY_JOB_TYPE_SLUGS`; fixed-term shares
 exclude PhD studentships (`trends.is_studentship`).

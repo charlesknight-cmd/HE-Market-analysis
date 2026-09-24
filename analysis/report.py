@@ -17,9 +17,8 @@ from analysis.alerts import check_all, print_alerts
 from analysis.institutions import top_institutions, spike_candidates
 from analysis.trends import (
     category_growth_wow,
-    category_weekly_counts,
-    overall_summary,
-    salary_trends_by_category,
+    headline_stats,
+    salary_by_discipline,
 )
 
 
@@ -33,12 +32,13 @@ def run_report(days: int = 30) -> None:
     _divider("HE Job Market — Analysis Report")
 
     # ── Overview ──────────────────────────────────────────────
-    summary = overall_summary()
-    print(f"\n  Total jobs in DB : {summary['total_jobs']:,}")
-    print(f"  New (last 7 days): {summary['new_7d']:,}")
-    print(f"  New (last 30 days): {summary['new_30d']:,}")
-    print(f"  Institutions seen: {summary['institutions']:,}")
-    print(f"  Categories       : {summary['categories']}")
+    h = headline_stats(days=days)
+    prev = f" (previous week {h['prev_week']:,})" if h["prev_week"] is not None else ""
+    print(f"\n  Adverts in DB           : {h['total_jobs']:,}")
+    print(f"  Last complete week      : {h['last_week']:,} (w/c {h['last_week_label'] or '—'}){prev}")
+    print(f"  Posted in last {days} days : {h['n_recent']:,}")
+    print(f"  Institutions recruiting : {h['institutions']:,}")
+    print(f"  Disciplines             : {h['disciplines']}")
 
     # ── Alerts ────────────────────────────────────────────────
     _divider("Alerts")
@@ -83,22 +83,16 @@ def run_report(days: int = 30) -> None:
             print(f"  {r['institution']}: {r['job_count']} jobs ({r['category_list']})")
 
     # ── Salary snapshot ───────────────────────────────────────
-    _divider("Salary Snapshot by Category (most recent week with data)")
-    salary = salary_trends_by_category(weeks=4)
+    _divider("Median Salary Floor by Discipline (full-time, last 180 days)")
+    salary = salary_by_discipline(days=180, min_n=20)
     if not salary:
         print("  No salary data available.")
     else:
-        # Show only the most recent week per category
-        latest: dict[str, dict] = {}
+        print(f"  {'Discipline':<35} {'Median':>10} {'p25':>10} {'p75':>10} {'n':>5}")
+        print(f"  {'-'*35} {'-'*10} {'-'*10} {'-'*10} {'-'*5}")
         for r in salary:
-            latest[r["category"]] = r
-        print(f"  {'Category':<35} {'Avg £min':>10} {'Avg £max':>10} {'n':>5}")
-        print(f"  {'-'*35} {'-'*10} {'-'*10} {'-'*5}")
-        for cat, r in sorted(latest.items()):
-            label = discipline_label(cat)
-            lo = f"£{r['avg_salary_min']:,.0f}" if r["avg_salary_min"] else "  —"
-            hi = f"£{r['avg_salary_max']:,.0f}" if r["avg_salary_max"] else "  —"
-            print(f"  {label:<35} {lo:>10} {hi:>10} {r['n']:>5}")
+            median, p25, p75 = (f"£{r[k]:,.0f}" for k in ("median_salary", "p25", "p75"))
+            print(f"  {discipline_label(r['category']):<35} {median:>10} {p25:>10} {p75:>10} {r['n']:>5}")
 
     print(f"\n{'─' * 60}\n")
 

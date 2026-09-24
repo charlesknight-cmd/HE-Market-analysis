@@ -363,13 +363,15 @@ with t_overview:
     k1, k2, k3, k4, k5, k6 = st.columns(6)
     k1.metric("Adverts collected", f"{h['total_jobs']:,}")
     _delta = (h["last_week"] - h["prev_week"]) if h["prev_week"] is not None else None
-    k2.metric(f"Last complete week ({h['last_week_label'] or '—'})", f"{h['last_week']:,}",
+    _wk = pd.Timestamp(h["last_week_label"]).strftime("w/c %d %b") if h["last_week_label"] else "—"
+    k2.metric(f"Last complete week ({_wk})", f"{h['last_week']:,}",
               delta=f"{_delta:+d} vs previous week" if _delta is not None else None)
     k3.metric("Median days to apply", f"{h['median_window_days']} d" if h["median_window_days"] is not None else "—")
     k4.metric("Adverts hiding pay", f"{h['hidden_pay_pct']:.0f}%" if h["hidden_pay_pct"] is not None else "—")
     k5.metric("Permanent share", f"{h['permanent_pct']:.0f}%" if h["permanent_pct"] is not None else "—")
     k6.metric("Institutions recruiting", f"{h['institutions']:,}")
     st.caption(f"Rates over the last {h['window_days']} days of postings ({h['n_recent']:,} adverts); "
+               "hiding pay excludes International adverts (foreign-currency pay does not parse); "
                "permanent share excludes PhD studentships. The week-on-week figure compares the last "
                "two complete weeks.")
 
@@ -578,7 +580,7 @@ with t_institutions:
                 if trend:
                     df_t = pd.DataFrame(trend)
                     fig = px.bar(df_t, x="week", y="job_count",
-                                 labels={"week": "ISO week", "job_count": "Adverts"},
+                                 labels={"week": "Week commencing", "job_count": "Adverts"},
                                  title=f"{selected} — adverts per complete week")
                     st.plotly_chart(fig, width='stretch', key="inst_drill")
             with col_drill_r:
