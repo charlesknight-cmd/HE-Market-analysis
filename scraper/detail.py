@@ -222,22 +222,32 @@ def _iso_to_date(value: str | None) -> str | None:
         return m.group(1) if m else None
 
 
-def _parse_location(job: dict) -> tuple[str | None, str | None]:
-    """Return (location, region) from the JobPosting jobLocation block."""
-    loc = job.get("jobLocation")
-    if isinstance(loc, list):
-        loc = loc[0] if loc else None
-    if not isinstance(loc, dict):
-        return None, None
-    addr = loc.get("address") or {}
+_UK_NATIONS = {"england", "scotland", "wales", "northern ireland"}
+
+# jobs.ac.uk's own per-advert region bucket, embedded in the page's site JSON as
+# `"location":"Europe","location_code":"..."`. Observed values: "London", "Wales",
+# "Europe", "Asia & Middle East", "Africa". Only used to break a UK/overseas tie
+# between multiple jobLocation entries.
+_SITE_REGION_RE = re.compile(r'"location":"([^"]*)","location_code"')
+_OVERSEAS_SITE_REGIONS = {
+    "europe", "asia & middle east", "africa", "americas", "north america",
+    "south america", "australasia", "republic of ireland", "overseas",
+}
+
+
+def _site_region(html: str) -> str | None:
+    m = _SITE_REGION_RE.search(html or "")
+    return (m.group(1).strip() or None) if m else None
+
+
+def _address_region(addr) -> tuple[str | None, str | None]:
+    """Return (locality, region) for one schema.org PostalAddress."""
     if not isinstance(addr, dict):
         return None, None
-
     locality = (addr.get("addressLocality") or "").strip() or None
     region_raw = (addr.get("addressRegion") or "").strip()
     country = (addr.get("addressCountry") or "").strip()
 
-    _UK_NATIONS = {"england", "scotland", "wales", "northern ireland"}
     if country and country.lower() not in _UK_COUNTRIES:
         region = "International"
     elif region_raw.lower() in _UK_NATIONS:
@@ -248,6 +258,85 @@ def _parse_location(job: dict) -> tuple[str | None, str | None]:
     else:
         region = None
     return locality, region
+
+
+def _parse_location(job: dict, site_region: str | None = None) -> tuple[str | None, str | None]:
+    """Return (location, region) from the JobPosting jobLocation block.
+
+    Normally the first address wins. When the entries mix UK and overseas sites
+    (e.g. a DTU PhD run with Imperial: London + Lyngby) their order says nothing
+    about where the employer is, so jobs.ac.uk's own region bucket for the advert
+    (`site_region`) decides; with no recognisable bucket the first entry stands.
+    """
+    loc = job.get("jobLocation")
+    entries = loc if isinstance(loc, list) else [loc]
+    parsed = [_address_region(e.get("address")) for e in entries if isinstance(e, dict)]
+    parsed = [p for p in parsed if p != (None, None)]
+    if not parsed:
+        return None, None
+
+    overseas = [p for p in parsed if p[1] == "International"]
+    uk = [p for p in parsed if p[1] != "International"]
+    if overseas and uk and site_region:
+        bucket = site_region.lower()
+        if bucket in _OVERSEAS_SITE_REGIONS:
+            return overseas[0]
+        if bucket in _UK_NATIONS or bucket == "london" or "england" in bucket:
+            return uk[0]
+    return parsed[0]
+
+
+# Enhanced "campaign-site" adverts (employer microsites: XJTLU, UNNC, Auckland,
+# UWS, BCU ...) embed no JobPosting JSON-LD at all, only an "Advert Details"
+# table. Its Location cell follows the site's display convention, also seen in
+# standard pages' "locations" field: "Suzhou - China" overseas, a bare place name
+# ("Ayr", "London, Stratford") in the UK.
+_ADVERT_DETAILS_RE = re.compile(r'id="advert-details".*?</table>', re.DOTALL | re.IGNORECASE)
+_ADVERT_ROW_RE = re.compile(r"<th>(.*?)</th>\s*<td>(.*?)</td>", re.DOTALL | re.IGNORECASE)
+
+
+def _cell_text(fragment: str) -> str:
+    text = _html.unescape(re.sub(r"<[^>]+>", " ", fragment))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _listed_location_region(text: str) -> tuple[str | None, str | None]:
+    """Return (locality, region) for a displayed location like 'Suzhou - China'."""
+    text = (text or "").strip()
+    if not text:
+        return None, None
+    place, sep, country = text.rpartition(" - ")
+    if not sep:
+        if text.lower() in _UK_NATIONS:
+            return None, text
+        return text, "UK (unspecified)"
+    place, country = place.strip() or None, country.strip()
+    if country.lower() not in _UK_COUNTRIES:
+        return place, "International"
+    if country.lower() in _UK_NATIONS:
+        return place, country
+    return place, "UK (unspecified)"
+
+
+def _parse_advert_details(html: str) -> dict:
+    """Location, region, contract type and hours from an enhanced advert's table.
+
+    Returns only the fields it found (possibly an empty dict).
+    """
+    block = _ADVERT_DETAILS_RE.search(html or "")
+    if not block:
+        return {}
+    rows = {_cell_text(k).rstrip(":").strip().lower(): _cell_text(v)
+            for k, v in _ADVERT_ROW_RE.findall(block.group(0))}
+    out = {}
+    location, region = _listed_location_region(rows.get("location", ""))
+    if region:
+        out["location"], out["region"] = location, region
+    if rows.get("contract type"):
+        out["contract_type"] = _parse_contract_type(rows["contract type"])
+    if rows.get("hours"):
+        out["hours"] = _parse_hours(rows["hours"])
+    return {k: v for k, v in out.items() if v is not None}
 
 
 def _parse_basesalary(job: dict) -> tuple[float | None, float | None]:
@@ -294,14 +383,15 @@ def parse_detail(html: str) -> dict:
 
     Returns closing_date, contract_type, hours, location, region, date_posted,
     and salary_min/salary_max (annual GBP from baseSalary). Any field that can't
-    be found is None; all-None if there's no JobPosting block at all.
+    be found is None. With no JobPosting block (enhanced microsite adverts) only
+    the Advert Details table's location/region/contract/hours can be filled.
     """
     job = _extract_jobposting(html)
     if not job:
-        return dict(_EMPTY_DETAIL)
+        return {**_EMPTY_DETAIL, **_parse_advert_details(html)}
 
     employment = job.get("employmentType") or ""
-    location, region = _parse_location(job)
+    location, region = _parse_location(job, _site_region(html))
     salary_min, salary_max = _parse_basesalary(job)
     return {
         "closing_date":  _iso_to_date(job.get("validThrough")),

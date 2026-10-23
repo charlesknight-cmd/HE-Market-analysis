@@ -11,6 +11,17 @@
 > non-UK countries bucketed as "International". The rate-limiting, missing-only,
 > and backfill design below was implemented as written. The original scope is
 > retained for context.
+>
+> **Enhanced adverts (fixed 2026-10-23):** employer "campaign-site" microsite
+> adverts (XJTLU, UNNC, Auckland, UWS, BCU, Rosalind Franklin, ...) carry **no**
+> JSON-LD. For those, `parse_detail` falls back to the page's "Advert Details"
+> table: location (`Suzhou - China` ⇒ International; a bare UK place ⇒
+> `UK (unspecified)`), contract type and hours. Before the fix these rows were
+> stamped enriched with region/contract/hours NULL (~270 by Oct 2026), which
+> undercounted International. `python -m scripts.rederive_regions` (dry run by
+> default, `--apply` to write) repairs existing rows. When `jobLocation` lists
+> both UK and overseas sites, jobs.ac.uk's own region bucket for the advert
+> (`"location":"Europe"` in the page JSON) picks which one sets `region`.
 
 ---
 
