@@ -18,7 +18,7 @@ import argparse
 import sqlite3
 from pathlib import Path
 
-from config import DB_PATH, LEGACY_JOB_TYPE_SLUGS, discipline_label
+from config import DB_PATH, NON_DISCIPLINE_SLUGS, discipline_label
 
 # One hue, two shades (sequential blue steps 250 and 550 from the dataviz palette,
 # validated as an ordinal pair), plus chart chrome.
@@ -58,7 +58,7 @@ def load_data(db_path: Path) -> dict:
 
     rows = []
     for cat, n_every in every.items():
-        if cat in LEGACY_JOB_TYPE_SLUGS:
+        if cat in NON_DISCIPLINE_SLUGS:
             continue
         n_first = first_listed.get(cat, 0)
         rows.append({

@@ -55,3 +55,7 @@ def test_alerts_layer_has_no_dashboard_import():
         text = f.read()
     assert "import dashboard" not in text
     assert "from dashboard" not in text
+
+
+def test_non_academic_slug_uses_its_display_name():
+    assert discipline_label("international-activities") == "International Activities"

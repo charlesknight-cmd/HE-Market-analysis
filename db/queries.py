@@ -2,7 +2,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from config import DISCIPLINES
+from config import DISCIPLINES, NON_ACADEMIC_DISCIPLINES
 from db.schema import get_connection
 
 
@@ -66,11 +66,13 @@ def upsert_disciplines(conn: sqlite3.Connection, job_id: str,
 
 
 def _listing_discipline(job: dict[str, Any]) -> list[dict[str, Any]]:
-    """The academic-discipline tag implied by the facet a listing was scraped under."""
+    """The discipline tag implied by the facet a listing was scraped under."""
     slug = job.get("category")
-    if slug not in DISCIPLINES:      # legacy job-type slug or unknown - not a discipline
-        return []
-    return [{"facet": "academic", "slug": slug, "name": DISCIPLINES[slug]}]
+    if slug in DISCIPLINES:
+        return [{"facet": "academic", "slug": slug, "name": DISCIPLINES[slug]}]
+    if slug in NON_ACADEMIC_DISCIPLINES:
+        return [{"facet": "non-academic", "slug": slug, "name": NON_ACADEMIC_DISCIPLINES[slug]}]
+    return []                        # legacy job-type slug or unknown - not a discipline
 
 
 def upsert_job(conn: sqlite3.Connection, job: dict[str, Any]) -> str:

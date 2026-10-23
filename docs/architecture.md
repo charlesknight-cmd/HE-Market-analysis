@@ -4,6 +4,7 @@
 
 ```
 jobs.ac.uk /search/?academicDisciplineFacet[]=<slug> (21 subject disciplines)
+         + /search/?nonAcademicDisciplineFacet[]=<slug> (config.NON_ACADEMIC_DISCIPLINES)
         │   scraper/fetcher.py  — one discipline at a time, paginated, incremental
         ▼
    search-result HTML pages
@@ -30,7 +31,7 @@ A scrape run is orchestrated by `scraper/run.py`:
 | Layer | Module | Responsibility |
 |-------|--------|----------------|
 | Config | `config.py` | Discipline list + facet, pagination/politeness, category labels, schedule time, alert thresholds, HTTP headers, DB path |
-| Scrape | `scraper/fetcher.py` | Fetch each discipline via the `academicDisciplineFacet[]` facet (sequential, stateless URLs); paginate per discipline, stopping early on already-seen jobs |
+| Scrape | `scraper/fetcher.py` | Fetch each discipline via the `academicDisciplineFacet[]` facet, then each non-academic discipline in `config.NON_ACADEMIC_DISCIPLINES` via `nonAcademicDisciplineFacet[]` (sequential, stateless URLs); paginate per discipline, stopping early on already-seen jobs |
 | Scrape | `scraper/parser.py` | Turn search-result cards into clean job dicts; normalise salary/dates; infer year on year-less listing dates |
 | Scrape | `scraper/run.py` | CLI entry point; one-shot and daemon orchestration |
 | Persist | `db/schema.py` | Connection (WAL), schema creation, idempotent `_migrate`, index creation |

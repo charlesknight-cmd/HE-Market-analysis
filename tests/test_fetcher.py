@@ -5,8 +5,14 @@ query param (URL-encoded), making it self-describing and stateless — these tes
 pin that scheme down.
 """
 
-from config import SEARCH_BASE
-from scraper.fetcher import _page_url
+from config import (
+    DISCIPLINE_FACET,
+    DISCIPLINES,
+    NON_ACADEMIC_DISCIPLINES,
+    NON_ACADEMIC_FACET,
+    SEARCH_BASE,
+)
+from scraper.fetcher import _page_url, _scan_plan
 
 
 class TestPageUrl:
@@ -33,3 +39,20 @@ class TestPageUrl:
     def test_facet_present_on_every_page(self):
         # The facet must ride on page 2+ too, not just page 1
         assert "academicDisciplineFacet%5B%5D=psychology" in _page_url("psychology", 26, 25)
+
+
+class TestNonAcademicFacet:
+    def test_non_academic_facet_in_url(self):
+        url = _page_url("international-activities", 1, 25, NON_ACADEMIC_FACET)
+        assert url == (
+            f"{SEARCH_BASE}/?nonAcademicDisciplineFacet%5B%5D=international-activities"
+            "&sortOrder=1&pageSize=25&startIndex=1"
+        )
+
+    def test_scan_plan_runs_academic_disciplines_first(self):
+        # jobs.category keeps the first facet a job is seen under, so a job tagged
+        # both ways must meet its academic discipline first.
+        plan = _scan_plan()
+        assert plan[:len(DISCIPLINES)] == [(s, DISCIPLINE_FACET) for s in DISCIPLINES]
+        assert plan[len(DISCIPLINES):] == [(s, NON_ACADEMIC_FACET) for s in NON_ACADEMIC_DISCIPLINES]
+        assert ("international-activities", NON_ACADEMIC_FACET) in plan

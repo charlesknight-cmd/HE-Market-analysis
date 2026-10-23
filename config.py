@@ -41,6 +41,18 @@ DISCIPLINES = {
     "sport-and-leisure":                       "Sport & Leisure",
 }
 
+# Non-academic disciplines scraped alongside the 21 academic ones, via the
+# `nonAcademicDisciplineFacet[]` facet. Professional-services roles are often
+# tagged ONLY here, so the academic scan never sees them: in Oct 2026 just 1 of
+# 21 live "International Activities" adverts (international officers, student
+# recruitment, mobility, TNE managers) was in the DB. A job first found under one
+# of these carries its slug in `jobs.category` and a `non-academic` tag in
+# `job_disciplines`; it is not an academic discipline (see NON_DISCIPLINE_SLUGS).
+NON_ACADEMIC_FACET = "nonAcademicDisciplineFacet[]"
+NON_ACADEMIC_DISCIPLINES = {
+    "international-activities": "International Activities",
+}
+
 # Pagination + politeness. jobs.ac.uk caps page size at 25 (larger values are
 # ignored or return empty), so we step startIndex by PAGE_SIZE. Listings are
 # sorted newest-first, so the daily scrape stops once it hits a page of jobs it
@@ -75,6 +87,12 @@ LEGACY_JOB_TYPE_SLUGS = frozenset({
     "craft-or-manual", "clerical", "technical",
 })
 
+# Every slug that can ride on `jobs.category` but is NOT an academic discipline:
+# the legacy job types plus the non-academic facets we scrape. The discipline
+# views fall back to `jobs.category` for a job with no academic tag, so
+# discipline breakdowns must skip these.
+NON_DISCIPLINE_SLUGS = LEGACY_JOB_TYPE_SLUGS | frozenset(NON_ACADEMIC_DISCIPLINES)
+
 # Connector words kept lowercase when prettifying a slug that has no explicit
 # display name (matches how the legacy job-type names read, e.g. "Academic or
 # Research").
@@ -97,6 +115,8 @@ def discipline_label(slug: str) -> str:
     """
     if slug in CATEGORY_LABELS:
         return CATEGORY_LABELS[slug]
+    if slug in NON_ACADEMIC_DISCIPLINES:
+        return NON_ACADEMIC_DISCIPLINES[slug]
     words = str(slug).replace("_", "-").replace("-", " ").split()
     if not words:
         return str(slug)

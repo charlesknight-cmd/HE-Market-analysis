@@ -27,7 +27,7 @@ One row per unique listing, keyed by `job_id`.
 | `date_posted` | TEXT (YYYY-MM-DD) | listing (`Date Placed:`), year inferred | ~100% | Advertised posting date, from the card. Drives the recruitment-window calc (`closing_date − date_posted`). Enrichment confirms it from JSON-LD `datePosted`. |
 | `enriched_at` | TEXT (ISO-8601 UTC) | enrichment | enriched | When the job was enriched. NULL ⇒ not yet processed (will be picked up next run). |
 | `disciplines_at` | TEXT (ISO-8601 UTC) | enrichment / `scripts.backfill_disciplines` | enriched | When the detail page's Subject Area(s) were captured into `job_disciplines`. NULL ⇒ pending backfill. |
-| `category` | TEXT | discipline facet slug | 100% | **The discipline facet the job was first scraped under — not its full set of disciplines.** A job tagged with several disciplines (common: ~2 in 3 STEM jobs) keeps only the first-scanned one here. Use `job_disciplines` / the `jobs_by_discipline` view for attribution; treat this column as provenance. Rows from before the 2026-06-09 taxonomy change hold a legacy job-type slug (`academic-or-research`, …). |
+| `category` | TEXT | discipline facet slug | 100% | **The discipline facet the job was first scraped under — not its full set of disciplines.** A job tagged with several disciplines (common: ~2 in 3 STEM jobs) keeps only the first-scanned one here. Use `job_disciplines` / the `jobs_by_discipline` view for attribution; treat this column as provenance. Rows from before the 2026-06-09 taxonomy change hold a legacy job-type slug (`academic-or-research`, …). Since 2026-10-23 a job first found by a non-academic scan holds that slug (`international-activities`); academic scans run first, so this only happens when no academic scan has seen the job. |
 | `url` | TEXT | listing (card title link) | 100% | Canonical listing URL; also the detail page fetched for enrichment. |
 | `first_seen` | TEXT (ISO-8601 UTC) | scraper | 100% | When this job_id was first observed. Provenance only: no chart uses it as a time axis (the 26 May 2026 backfill put 1,836 adverts into one week). |
 | `last_seen` | TEXT (ISO-8601 UTC) | scraper | 100% | Updated every scrape the job still appears near the top of its facet. NOT a lifetime measure: the scraper stops paging at the first fully-known page, so older adverts stop being refreshed. |
@@ -102,6 +102,17 @@ Since 2026-06-09 `category` holds one of jobs.ac.uk's 21 subject-discipline slug
 full slug→name map is `config.DISCIPLINES`. The largest disciplines are Health &
 Medical, Computer Sciences, and Engineering & Technology (each ~330–360 live
 postings); the long tail (Agriculture, Sport & Leisure, …) runs to a few dozen.
+
+**Non-academic scans (since 2026-10-23).** The scraper also scans the
+non-academic disciplines in `config.NON_ACADEMIC_DISCIPLINES`, currently only
+`international-activities` (~20 live adverts: international officers, student
+recruitment, mobility, TNE managers). Before this, those roles were captured only
+when also tagged with an academic discipline (1 of 21 in October 2026). They get a
+`non-academic` row in `job_disciplines`. A job with no academic tag falls back to
+its `category` in the discipline views, so discipline breakdowns exclude
+`config.NON_DISCIPLINE_SLUGS` (legacy job types plus non-academic slugs). These
+jobs do count in market-wide totals, so overall volumes step up slightly from
+23 October 2026.
 
 Rows scraped before that date carry a **legacy job-type slug** (`academic-or-research`,
 `professional-or-managerial`, `further-education`, …) from the retired feed

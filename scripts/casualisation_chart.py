@@ -23,7 +23,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-from config import DB_PATH, LEGACY_JOB_TYPE_SLUGS, discipline_label
+from config import DB_PATH, NON_DISCIPLINE_SLUGS, discipline_label
 
 # Role classification, the balanced band and the studentship rule are shared
 # with the dashboard chart.
@@ -75,7 +75,7 @@ def load_data(db_path: Path, min_n: int = 100) -> dict:
 
     rows = []
     for cat, d in per_disc.items():
-        if cat in LEGACY_JOB_TYPE_SLUGS or d["n_contract"] < min_n:
+        if cat in NON_DISCIPLINE_SLUGS or d["n_contract"] < min_n:
             continue
         rows.append({
             "category": cat, **d,

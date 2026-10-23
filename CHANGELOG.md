@@ -5,6 +5,20 @@ All notable changes to this project are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+- **Non-academic "International Activities" scan.** The scraper also scans
+  `nonAcademicDisciplineFacet[]=international-activities`, after the 21 academic
+  disciplines. Professional-services international roles (international officers,
+  student recruitment, mobility, TNE managers) are often tagged only there, so
+  only 1 of 21 live adverts was in the DB. Add more slugs to
+  `config.NON_ACADEMIC_DISCIPLINES` to scan other professional-services areas.
+  - Listing scans record a `non-academic` tag in `job_disciplines`.
+  - New `config.NON_DISCIPLINE_SLUGS` (legacy job types plus non-academic slugs)
+    replaces `LEGACY_JOB_TYPE_SLUGS` in discipline filters, so these jobs never
+    appear as a discipline.
+  - Market-wide totals rise slightly from 23 October 2026, and adverts that
+    closed before then cannot be recovered.
+
 ### Fixed
 - **Code review of the September 2026 dashboard review:**
   - `is_studentship` matched "Postdoctoral Researcher" (it contains "doctoral

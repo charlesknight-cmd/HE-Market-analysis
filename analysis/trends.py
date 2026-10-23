@@ -4,7 +4,7 @@ import re
 import math
 from collections import defaultdict
 
-from config import LEGACY_JOB_TYPE_SLUGS, discipline_label
+from config import NON_DISCIPLINE_SLUGS, discipline_label
 from db.schema import get_connection
 
 # Every windowed query keys off `date_posted` (the advert's true publication
@@ -35,9 +35,10 @@ _COMPLETE_WEEKS = (
     "AND date_posted < " + _week_start("'now'")
 )
 
-# Retired job-type slugs (pre-June-2026 taxonomy) still ride on a few rows'
-# `category`; they are not disciplines, so discipline breakdowns skip them.
-_NOT_LEGACY = "category NOT IN (" + ", ".join(f"'{x}'" for x in sorted(LEGACY_JOB_TYPE_SLUGS)) + ")"
+# Retired job-type slugs (pre-June-2026 taxonomy) and the non-academic facets we
+# scrape (config.NON_ACADEMIC_DISCIPLINES) ride on some rows' `category`; they
+# are not disciplines, so discipline breakdowns skip them.
+_NOT_LEGACY = "category NOT IN (" + ", ".join(f"'{x}'" for x in sorted(NON_DISCIPLINE_SLUGS)) + ")"
 
 # Discipline-level queries read from the views in db/schema.py rather than the
 # jobs table: `jobs_by_discipline` has one row per job x academic discipline
@@ -970,7 +971,7 @@ def recruitment_mix_by_discipline(days: int = 180, min_n: int = 40,
     market_pct = round(100 * fixed_all / contracted, 1) if contracted else 0.0
     per: dict[str, dict] = {}
     for r in rows:
-        if r["category"] in LEGACY_JOB_TYPE_SLUGS:
+        if r["category"] in NON_DISCIPLINE_SLUGS:
             continue
         d = per.setdefault(r["category"], {"n": 0, "fixed_term": 0, "research": 0, "lecturer": 0})
         if r["contract_type"] in ("permanent", "fixed-term") and _counts(r):
@@ -1164,7 +1165,7 @@ def attribution_counts() -> list[dict]:
         scanned = dict(conn.execute("SELECT category, COUNT(*) FROM jobs GROUP BY 1").fetchall())
     rows = []
     for cat, n in every.items():
-        if cat in LEGACY_JOB_TYPE_SLUGS:
+        if cat in NON_DISCIPLINE_SLUGS:
             continue
         f = first.get(cat, 0)
         rows.append({"category": cat, "every_tag": n, "first_listed": f,

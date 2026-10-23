@@ -7,6 +7,8 @@ from config import (
     DISCIPLINE_FACET,
     DISCIPLINES,
     MAX_PAGES_PER_CATEGORY,
+    NON_ACADEMIC_DISCIPLINES,
+    NON_ACADEMIC_FACET,
     PAGE_DELAY,
     PAGE_SIZE,
     REQUEST_HEADERS,
@@ -15,15 +17,17 @@ from config import (
 from scraper.parser import parse_listing_html
 
 
-def _page_url(discipline: str, start_index: int, page_size: int) -> str:
+def _page_url(discipline: str, start_index: int, page_size: int,
+              facet: str = DISCIPLINE_FACET) -> str:
     """Build the search URL for one discipline + page.
 
-    The discipline rides in the `academicDisciplineFacet[]` query param on every
+    The discipline rides in the facet query param (`academicDisciplineFacet[]`,
+    or `nonAcademicDisciplineFacet[]` for a non-academic discipline) on every
     request, so each request is self-describing — unlike the bare
     `/search/?startIndex=` endpoint, it does not depend on per-IP search state
     and so can't be clobbered by other requests.
     """
-    facet = quote(DISCIPLINE_FACET, safe="")  # academicDisciplineFacet%5B%5D
+    facet = quote(facet, safe="")  # academicDisciplineFacet%5B%5D
     return (
         f"{SEARCH_BASE}/?{facet}={discipline}"
         f"&sortOrder=1&pageSize={page_size}&startIndex={start_index}"
@@ -37,6 +41,7 @@ def fetch_category(
     page_size: int = PAGE_SIZE,
     delay: float = PAGE_DELAY,
     session: requests.Session | None = None,
+    facet: str = DISCIPLINE_FACET,
 ) -> tuple[list[dict], str | None]:
     """Scrape one discipline's search pages. Returns (jobs, error_or_None).
 
@@ -53,7 +58,7 @@ def fetch_category(
 
     try:
         for _ in range(max_pages):
-            url = _page_url(discipline, start_index, page_size)
+            url = _page_url(discipline, start_index, page_size, facet)
             resp = sess.get(url, headers=REQUEST_HEADERS, timeout=30)
             resp.raise_for_status()
 
@@ -76,17 +81,29 @@ def fetch_category(
     return list(jobs.values()), None
 
 
+def _scan_plan() -> list[tuple[str, str]]:
+    """(slug, facet) for every scan, academic disciplines first.
+
+    Order matters for `jobs.category`, which keeps the first facet a job was
+    seen under: scanning the academic disciplines first means a job tagged both
+    academically and non-academically keeps its academic discipline there.
+    """
+    return ([(slug, DISCIPLINE_FACET) for slug in DISCIPLINES]
+            + [(slug, NON_ACADEMIC_FACET) for slug in NON_ACADEMIC_DISCIPLINES])
+
+
 def fetch_all(known_ids: set[str] | None = None) -> dict[str, tuple[list[dict], str | None]]:
     """Scrape every discipline. Returns {discipline_slug: (jobs, error)}.
 
     Disciplines are fetched sequentially, each with a fresh session, to stay
     polite (one in-flight search at a time). The facet URLs are stateless, so
-    ordering doesn't matter for correctness — only for load.
+    ordering doesn't matter for correctness — only for load and for which slug
+    lands in `jobs.category` (see `_scan_plan`).
     """
     results = {}
-    for slug in DISCIPLINES:
+    for slug, facet in _scan_plan():
         try:
-            results[slug] = fetch_category(slug, known_ids, session=requests.Session())
+            results[slug] = fetch_category(slug, known_ids, session=requests.Session(), facet=facet)
         except Exception as exc:
             results[slug] = ([], str(exc))
     return results

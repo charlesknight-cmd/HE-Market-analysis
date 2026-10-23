@@ -233,6 +233,22 @@ class TestDisciplineStorage:
         assert _rows(tmp_db, "SELECT category, position FROM jobs_by_discipline") == [("academic-or-research", None)]
         assert _rows(tmp_db, "SELECT category FROM jobs_primary_discipline") == [("academic-or-research",)]
 
+    def test_non_academic_facet_scan_records_non_academic_tag(self, tmp_db):
+        bulk_upsert([_job("N1", "international-activities")])
+        assert _rows(tmp_db, "SELECT facet, slug, source FROM job_disciplines") == [
+            ("non-academic", "international-activities", "listing")]
+        # No academic tag, so the view falls back to jobs.category - which is why
+        # discipline breakdowns filter NON_DISCIPLINE_SLUGS.
+        assert _rows(tmp_db, "SELECT category FROM jobs_by_discipline") == [("international-activities",)]
+
+    def test_academic_scan_first_keeps_academic_category(self, tmp_db):
+        bulk_upsert([_job("B1", "education-studies-inc-tefl")])
+        bulk_upsert([_job("B1", "international-activities")])
+        assert _rows(tmp_db, "SELECT category FROM jobs WHERE job_id='B1'") == [("education-studies-inc-tefl",)]
+        assert _rows(tmp_db, "SELECT facet, slug FROM job_disciplines ORDER BY facet") == [
+            ("academic", "education-studies-inc-tefl"), ("non-academic", "international-activities")]
+        assert _rows(tmp_db, "SELECT category FROM jobs_by_discipline") == [("education-studies-inc-tefl",)]
+
     def test_detail_tags_upgrade_source_and_set_primary(self, tmp_db):
         bulk_upsert([_job("A1", "economics")])
         set_disciplines("A1", [
@@ -330,6 +346,14 @@ class TestAnalysisUsesViews:
         counts = {r["category"]: r["job_count"] for r in category_weekly_counts(weeks=4)}
         assert counts == {"economics": 1, "law": 1}
         assert headline_stats()["disciplines"] == 2
+
+    def test_weekly_counts_skip_non_academic_only_jobs(self, tmp_db):
+        from analysis.trends import category_weekly_counts, headline_stats
+        bulk_upsert([_job("A1", "economics"), _job("N1", "international-activities")])
+        _collected_since(tmp_db, 30)
+        counts = {r["category"]: r["job_count"] for r in category_weekly_counts(weeks=4)}
+        assert counts == {"economics": 1}
+        assert headline_stats()["disciplines"] == 1
 
     def test_spike_candidates_count_jobs_not_tags(self, tmp_db):
         from analysis.institutions import spike_candidates

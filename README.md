@@ -9,7 +9,8 @@ trend analysis, and presents everything through a Streamlit dashboard.
 ## What it does
 
 - **Scrapes** jobs.ac.uk search-results listings across its 21 subject
-  disciplines (one filtered search per discipline) daily.
+  disciplines, plus the non-academic "International Activities" discipline (one
+  filtered search per discipline) daily.
 - **Parses** institution, department, salary, location, date placed, and closing
   date from each listing.
 - **Stores** jobs in a local SQLite database (`data/jobs.db`, WAL mode), de-duplicated by job ID.
@@ -84,7 +85,11 @@ discipline** at a time (the 21 disciplines in `config.DISCIPLINES`). Around June
 HTTP 500 or HTML) **and dropped its six job-type category routes** (which all now
 return the same unfiltered list). Its live taxonomy is subject disciplines,
 selected via the search facet `academicDisciplineFacet[]=<slug>` — so the scraper
-filters on that and stores the discipline in the `category` column. The
+filters on that and stores the discipline in the `category` column. Non-academic
+disciplines listed in `config.NON_ACADEMIC_DISCIPLINES` (currently
+`international-activities`) are scanned after the academic ones via
+`nonAcademicDisciplineFacet[]=<slug>`, because professional-services roles are
+often tagged only there. The
 server-rendered cards carry more than the old feed ever did: title, institution,
 department, salary, **location**, **date placed**, and **closing date**. Each
 discipline is paginated (`?academicDisciplineFacet[]=<slug>&pageSize=25&startIndex=N`,
