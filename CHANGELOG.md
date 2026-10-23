@@ -20,6 +20,15 @@ All notable changes to this project are recorded here. Format loosely follows
     closed before then cannot be recovered.
 
 ### Fixed
+- **NULL `region` on enhanced adverts.** Employer-microsite adverts (XJTLU,
+  Nottingham Ningbo, Auckland, UWS, BCU, Rosalind Franklin, …) carry no JobPosting
+  JSON-LD, so enrichment left region, contract type and hours NULL and the
+  International count understated overseas employers. `scraper.detail` now falls
+  back to the advert's "Advert Details" table, and a multi-location advert that
+  mixes UK and overseas sites takes jobs.ac.uk's own region bucket.
+  `scripts/rederive_regions.py` (dry run by default, `--apply` to write) fixes
+  existing rows; a dry run on the 23 Oct live snapshot set region on 247 rows,
+  lifting International in 23 Jul–22 Oct from 506 to 595.
 - **Code review of the September 2026 dashboard review:**
   - `is_studentship` matched "Postdoctoral Researcher" (it contains "doctoral
     researcher") and "PhD required" job titles, so postdocs were dropped from
